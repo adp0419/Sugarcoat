@@ -9,7 +9,7 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 | Terminal | Owner files | % done | Current task |
 |----------|-------------|--------|--------------|
 | T1 core | backend/models.py, config.py, main.py, asr.py, rewrite.py, __init__.py, fixtures/, requirements.txt, Makefile, .env.example, PROGRESS.md | 80% | R1 done. R2 (stage deadlines, job watchdog, `make smoke`) not in git log yet as of 00:51; real Gemma still failing (401/500/slow) |
-| T2 guard/decide/voice | backend/guard.py, decide.py, voice.py, split.py, tests/, eval/ | 85% | R2 3/6 committed (voice_starting fix, guard corpus, deadlines); G1 blocked on Twinly voice engine, G2 on OpenAI credits; eval/RESULTS.md not committed yet |
+| T2 guard/decide/voice | backend/guard.py, decide.py, voice.py, split.py, tests/, eval/ | 95% | R3 7/7 done: G1 verified via /api/speak, real-voice backup clip, eval/RESULTS.md, docs, release check. Still blocked: G2 (OpenAI 429 no credits) |
 | T3 frontend | frontend/, README.md, DIFFICULTIES.md, docs/RUNBOOK.md | 85% | R2: watchdog, plain-English fallbacks, speak errors, names check done + tested; screenshots, RUNBOOK, README next |
 
 ## T1 core backend + contract
@@ -54,8 +54,8 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] R3-3 voice.py from real runs: 2 concurrent jobs crash Twinly's MLX engine -> one at a time; voice_failed re-posted once; identical chunks share one render; render survives the 60 s cap (paid audio lands in cache); per-chunk latency log + redacted last ok/fail body in logs/ (+6 tests) (2026-10-24 10:40)
 - [x] R3-4 guard: 3 known FNs fixed (dropped phrase, added list item, reordered roles) + dropped condition + "let me rephrase" marker; 13 new held-out cases (before the condition rule: 0/8 FP, 2/5 FN); corpus n=80: FP 0/44, FN 1/36 (ho_role_swap); T1 self-correction tests pass check_rules (2026-10-24 10:45)
 - [x] R3-5 eval/RESULTS.md: text eval n=24 on real keys (Gemma 402 + Decisions 429 -> every output from the deterministic rung: minimal 22, original 2), 3 real /api/process audio runs (ready, guard pass, 2.0-3.1 s), guard corpus n=80 FP 0/44 FN 1/36, Twinly latency table n=8 (2026-10-24 10:50). For T1: rewrite.minimal leaves phrase repeats ("I want to I want to"); trace marks decide ok + guard "deterministic+decisions" while both AI services are offline
-- [ ] R3-6 README, DIFFICULTIES, RUNBOOK, DEVPOST accurate to the final system
-- [ ] R3-7 release check + submission checklist in RUNBOOK
+- [x] R3-6 README (macOS 26+ requirement + reason, real eval summary, frontier table, ethics/privacy/licence/limitations; all linked files checked to exist), DIFFICULTIES round 3 (metallib error + how found, concurrent-job crash, Gemini 402, guard), RUNBOOK (engine /health, make smoke, backup audio, per-stage failures), docs/DEVPOST.md draft (2026-10-24 11:05). For T3: README links docs/demo.gif + screenshots ready, fallback-minimal, guard-blocked, names-check, playing, speak-twinly-offline (.png); tell T2 if the redesign renames them. DIFFICULTIES T3 R1 entry still calls backup_demo.m4a a tone
+- [x] R3-7 release check: secret grep tree + full history clean (only the public Twinly example mock key in docs/md/04), .env never tracked, .env.example keys blank, LICENSE MIT, largest blob docs/demo.gif 2.1 MB; submission checklist with done/not done in docs/RUNBOOK.md; `make test` 274 passed, 1 xfailed; not pushed, visibility unchanged (2026-10-24 11:05)
 
 ## T3 frontend
 - [x] 1  frontend/ skeleton (index.html, app.js, style) + record/mode/terms/demo (2026-10-23, offline mock toggle; real server not yet tried)
