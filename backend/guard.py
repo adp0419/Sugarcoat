@@ -7,6 +7,7 @@ verifier says. Run: ``python -m backend.guard "verbatim" "rewrite"``.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import re
 import sys
 from dataclasses import dataclass, field
@@ -55,6 +56,45 @@ QUANT = {"all": "all", "every": "all", "everyone": "all", "everybody": "all", "e
 NOT_MODAL_AFTER = {"the", "a", "an", "my", "our", "his", "her", "their", "your", "this", "that", "these", "those",
                    "school", "work", "class", "bed", "church", "town", "home"}
 NOT_NAMES = {"i", "am", "pm", "ok", "okay", "may", "march", "august"}
+# words that may separate a negation from its own repeat in a false start: "can't, uh, we cannot"
+REPEAT_GAP = {"um", "uh", "er", "erm", "ah", "hmm", "like", "so", "well", "i", "we", "you", "he", "she", "they", "it"}
+# sentence-start words that are never names (fillers, greetings, modern words missing from the 1934 dictionary)
+COMMON_EXTRA = {"um", "uh", "er", "erm", "ah", "hmm", "mm", "okay", "ok", "hey", "hi", "hello", "yeah", "yep", "nope",
+                "gonna", "wanna", "gotta", "email", "emails", "online", "laptop", "laptops", "website", "wifi", "app",
+                "apps", "everyone", "everybody", "anyone", "anybody", "someone", "somebody", "anyway", "basically",
+                "actually", "also", "let", "us", "attendee", "attendees", "rsvp", "teammate", "teammates", "signup",
+                "login", "webinar", "internet", "homepage", "smartphone"}
+_DICT_PATHS = ("/usr/share/dict/words", "/usr/share/dict/web2")
+_lower_words: set[str] | None = None
+
+
+def _dictionary() -> set[str]:
+    """Lower-case entries of the system word list. Capitalised-only entries (Sarah, Monday) are proper nouns."""
+    global _lower_words
+    if _lower_words is None:
+        _lower_words = set()
+        for path in _DICT_PATHS:
+            try:
+                with open(path, encoding="utf-8", errors="ignore") as fh:
+                    _lower_words = {w.strip() for w in fh if w[:1].islower()}
+                break
+            except OSError:
+                continue
+    return _lower_words
+
+
+def _looks_proper(word: str) -> bool:
+    """Sentence-start capitalised word -> probably a name? False when no dictionary is available."""
+    words = _dictionary()
+    if not words or word in COMMON_EXTRA or word in NOT_NAMES:
+        return False
+    w = re.sub(r"'s$", "", word)
+    stems = {w}
+    for suf, adds in (("ies", ("y",)), ("es", ("",)), ("s", ("",)), ("ed", ("", "e")), ("ing", ("", "e")),
+                      ("ly", ("",)), ("er", ("", "e")), ("est", ("", "e"))):
+        if w.endswith(suf) and len(w) > len(suf) + 2:
+            stems |= {w[: -len(suf)] + a for a in adds}
+    return not any(x in words for x in stems)
 
 _CONTRACTIONS = [
     (r"\bwon't\b", "will not"), (r"\bcan't\b", "cannot"), (r"\bshan't\b", "shall not"), (r"\bain't\b", "is not"),
@@ -77,6 +117,7 @@ class Tok:
     val: str
     raw: str
     cap: bool = False  # capitalised mid-sentence word (name candidate)
+    start_cap: bool = False  # capitalised first word of a sentence (name only if not a dictionary word)
     mer: str = ""      # am/pm for time tokens
     ordinal: bool = False
     pos: int = -1      # index among non-punctuation tokens
@@ -103,6 +144,7 @@ class Extraction:
     negations: list[str] = field(default_factory=list)
     quantifiers: dict[str, str] = field(default_factory=dict)
     modals: dict[str, str] = field(default_factory=dict)
+    negated: dict[tuple[str, str], str] = field(default_factory=dict)  # facts within 4 words after a negation
 
 
 def _clean(text: str) -> str:
@@ -146,7 +188,8 @@ def _tokenize(text: str) -> list[Tok]:
             sentence_start = False
         elif raw[0].isalpha():
             val = raw.lower()
-            toks.append(Tok("w", val, raw, cap=raw[0].isupper() and not sentence_start))
+            toks.append(Tok("w", val, raw, cap=raw[0].isupper() and not sentence_start,
+                            start_cap=raw[0].isupper() and sentence_start))
             sentence_start = False
         else:
             toks.append(Tok("p", raw, raw))
@@ -365,7 +408,7 @@ def extract(text: str, resolve: bool = True) -> Extraction:
     for t in ws:
         if t.kind in ("num", "time", "day", "month"):
             facts.append(Fact(t.kind, t.val, t.pos, t.raw, t.mer))
-        elif t.kind == "w" and t.cap and t.val not in NOT_NAMES:
+        elif t.kind == "w" and t.val not in NOT_NAMES and (t.cap or (t.start_cap and _looks_proper(t.val))):
             facts.append(Fact("name", re.sub(r"'s$", "", t.val), t.pos, t.raw))
 
     if resolve:
@@ -386,11 +429,20 @@ def extract(text: str, resolve: bool = True) -> Extraction:
 
     ex = Extraction(facts, final, superseded, words, toks)
     _style_features(ex, ws)
+    by_pos = {f.pos: f for f in facts if f.kind != "name" and not f.superseded}
+    for i in ex._neg_all:  # type: ignore[attr-defined]
+        for j in range(i + 1, min(i + 5, len(ws))):
+            f = by_pos.get(ws[j].pos)
+            if f is not None:
+                ex.negated[(f.kind, f.key)] = f"{ws[i].raw} ... {f.surface}"
+                break
     return ex
 
 
 def _style_features(ex: Extraction, ws: list[Tok]) -> None:
     skip_no: set[int] = set()
+    neg_pos: list[int] = []  # counted negations
+    ex._neg_all = []  # type: ignore[attr-defined]  # every negation, repeats included (for scope)
     for i, t in enumerate(ws):
         if t.kind == "w" and t.val == "no":
             nxt = ws[i + 1].val if i + 1 < len(ws) else ""
@@ -403,9 +455,14 @@ def _style_features(ex: Extraction, ws: list[Tok]) -> None:
         v = t.val
         nxt = ws[i + 1] if i + 1 < len(ws) else None
         nxt2 = ws[i + 2] if i + 2 < len(ws) else None
-        # negations
+        # negations (a negation repeated in a false start counts once)
         if v in NEGATIONS and i not in skip_no:
-            ex.negations.append(t.raw)
+            ex._neg_all.append(i)  # type: ignore[attr-defined]
+            prev = neg_pos[-1] if neg_pos else None
+            repeat = prev is not None and ws[prev].val == v or (prev is not None and {ws[prev].val, v} <= {"not", "cannot"})
+            if not (repeat and all(x.val in REPEAT_GAP for x in ws[prev + 1:i])):
+                ex.negations.append(t.raw)
+                neg_pos.append(i)
         if v == "no" and nxt is not None and nxt.val == "one":
             ex.quantifiers["none"] = "no one"
         # quantifiers
@@ -462,15 +519,20 @@ def _wc(text: str) -> int:
 
 
 def check_rules(original: str, rewrite: str, mode: str = "natural", protected: Iterable[str] = ()) -> GuardResult:
-    protected = [p.lower() for p in protected if p and p.strip()]
+    protected = [p.lower().strip() for p in protected if p and p.strip()]
     o = extract(original)
     r = extract(rewrite, resolve=False)
     vs: list[Violation] = []
+    # protected terms are the user's own spelling: allow them in the rewrite, and treat a close ASR
+    # mishearing in the original ("Ariane" for "Aryan") as the same word
+    prot_words = {w for p in protected for w in re.findall(r"[a-z0-9']+", p)}
+    alias = {w: pw for w in o.words for pw in prot_words
+             if w != pw and len(pw) >= 3 and w[:1] == pw[:1] and difflib.SequenceMatcher(None, w, pw).ratio() >= 0.7}
 
     # 1/2: facts (numbers, times, days, months, names)
     for g in r.facts:
         if g.kind == "name":
-            if g.key not in o.words:
+            if g.key not in o.words and g.key not in prot_words:
                 vs.append(Violation("invented_fact", "", g.surface,
                                     f'The rewrite mentions "{g.surface}", who/what you never named.'))
             continue
@@ -486,7 +548,7 @@ def check_rules(original: str, rewrite: str, mode: str = "natural", protected: I
     rwords = r.words
     for f in o.final:
         if f.kind == "name":
-            covered = f.key in rwords
+            covered = f.key in rwords or alias.get(f.key) in rwords
         else:
             covered = any(_match(f, g) for g in r.facts)
         if not covered:
@@ -499,10 +561,14 @@ def check_rules(original: str, rewrite: str, mode: str = "natural", protected: I
         if term in otext and term not in rtext:
             vs.append(Violation("protected_term", term, "", f'The protected term "{term}" is missing from the rewrite.'))
 
-    # 3: negation count
+    # 3: negation count, and negation moved onto a value you affirmed ("not Thursday" -> "not Friday")
     if len(o.negations) != len(r.negations):
         vs.append(Violation("negation", ", ".join(o.negations), ", ".join(r.negations),
                             f"Negation changed: you used {len(o.negations)}, the rewrite has {len(r.negations)}."))
+    for key, span in r.negated.items():
+        if key not in o.negated and any(f.kind == key[0] and f.key == key[1] for f in o.final):
+            vs.append(Violation("negation", "", span,
+                                f'The rewrite negates "{span.split(" ... ")[-1]}", which you did not negate.'))
 
     # 4: hedges
     for grp, span in o.hedges.items():
