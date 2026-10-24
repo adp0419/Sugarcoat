@@ -45,6 +45,8 @@ def live_calls():
 
 def shot(pg, name, full=False):
     SHOTS.mkdir(parents=True, exist_ok=True)
+    pg.mouse.move(1, 1)  # no stray hover styles in the docs
+    pg.wait_for_timeout(200)
     pg.screenshot(path=str(SHOTS / f"{name}.png"), full_page=full)
 
 
@@ -635,6 +637,7 @@ def case_real(b):
     pg.click("#demo")
     pg.wait_for_selector("#result:not([hidden])", timeout=70000)
     pg.wait_for_timeout(800)
+    pg.evaluate("window.scrollTo(0, 0)")
     check("real backend: demo clip reaches Review", "Ariane" in pg.inner_text("#verbatim") or len(pg.inner_text("#verbatim")) > 20, pg.inner_text("#verbatim")[:80])
     shot(pg, "real-run")
     print("  real run: rung=", pg.evaluate("app.job.rung"), " check=", pg.inner_text("#check"), " status=", pg.inner_text("#status-sum"))

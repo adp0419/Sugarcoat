@@ -681,6 +681,7 @@ function hardStop() {
     "Use your words without the AI edit, or try again.";
   $("watch-time").textContent = "";
   $("watch").hidden = false;
+  $("elapsed").textContent = "";
   setStatus("Stopped after 60 seconds.");
 }
 
@@ -821,7 +822,7 @@ function renderDiff() {
   const ops = diffWords(app.job.verbatim, $("final-text").value);
   const edited = $("final-text").value.trim() !== (app.baseRewrite || app.job.rewrite || "").trim();
   const box = $("diff"); box.replaceChildren();
-  let k = 0;
+  let k = 0, hunks = 0;
   while (k < ops.length) {
     if (ops[k].t === "eq") { box.append(ops[k].w + " "); k++; continue; }
     const dels = [], inss = [];
@@ -835,7 +836,10 @@ function renderDiff() {
     if (n) h.append(el("ins", { text: n }));
     h.append(el("span", { class: "chip", "aria-hidden": "true", text: reason }));
     box.append(h, " ");
+    hunks++;
   }
+  app.hunks = hunks;
+  syncLegend();
   renderNames();
 }
 
@@ -846,8 +850,14 @@ function showView(which) {
   $("show-said").setAttribute("aria-pressed", String(said));
   $("view-final").hidden = said || app.editing;
   $("view-said").hidden = !said;
-  $("legend").hidden = said;
   $("said-legend").hidden = !said;
+  syncLegend();
+}
+// The removed/added key only makes sense when something changed.
+function syncLegend() {
+  const said = $("show-said").getAttribute("aria-pressed") === "true";
+  $("legend").hidden = said || !app.hunks;
+  $("no-changes").hidden = said || !!app.hunks;
 }
 
 const PRED_LABEL = {

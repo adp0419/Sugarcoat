@@ -218,7 +218,7 @@ body[data-state="recording"] .rec-stop { display: block; }
 .meter-label[data-s="speech"] { color: var(--c-accent-strong); }
 .hint { font-size: var(--fs-sm); color: var(--c-text-2); }
 
-body[data-phase="review"] .live, body[data-phase="hear"] .live { display: none; }
+body[data-phase="review"] .live, body[data-phase="hear"] .live, body[data-phase="process"] .live:not([data-s="text"]) { display: none; }
 .live { border: 1px dashed var(--c-line-strong); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2) var(--sp-2); background: var(--c-subtle); }
 .live-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-half) var(--sp-1); margin-bottom: var(--sp-half); }
 .tag { font-size: var(--fs-sm); font-weight: 600; color: var(--c-accent-strong); }
