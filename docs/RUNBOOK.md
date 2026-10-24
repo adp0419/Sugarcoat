@@ -38,6 +38,19 @@ One page. Print it. Finals: Mon Oct 26, 10:15 AM, Reitz Union. One speaker (the 
 - [ ] Names field filled in ("Aryan Patel", "Gator Hack") so speech recognition can't mangle them.
 - [ ] Mode Auto, "Simulate bad rewrite" off, page at the top.
 
+## Stage-mode demo
+
+Stage mode sends each sentence as its own clip (`POST /api/stage/segment`) and, only when the guard passes and `consent=1`, queues the cloned line. The room hears the voice a few seconds after the sentence, not after the whole announcement. Same Mac and Twinly engine as the checklist above.
+
+1. **Engine.** `curl -s http://127.0.0.1:4807/health`. Want `"ok": true`, `"clone": true`. `"fast": true` means the local fast model is loaded; the public speak API may still use the quality model (about 6 s for a short line). If health fails, quit Twinly (Cmd+Q), reopen, wait a minute, check again.
+2. **Stay awake.** `caffeinate -d` in a terminal and leave it. A sleep mid-render comes back as "voice engine still starting".
+3. **iPhone mic (Continuity).** Same Apple ID on the phone and the Mac, Wi-Fi and Bluetooth on, phone unlocked and next to the Mac. Chrome → site settings for `localhost` → Microphone → the iPhone. Talk into the phone. The Mac runs VoiceFlow and plays the voice.
+4. **Speakers.** System Settings → Sound → Output → Mac speakers or the venue output. Volume up before you start. This is half-duplex: do not keep the mic open while the cloned line plays, or the phone will hear the voice and the next segment will transcribe the playback.
+5. **Headphones (full duplex).** Plug headphones into the Mac and select them as the output. The iPhone mic does not hear the playback, so the next sentence can be recorded while the previous line renders and plays. Use this when you want the pipeline overlapped. Say so if the room cannot hear the headphones.
+6. **Latency check, no charge.** With the server up, `make bench-stage`. It posts the files in `fixtures/` at real-time pace with `consent=0` and does not call Twinly. It refuses `--speak` unless `/api/health` says `mock: true`.
+
+Auto-speak is the text of the segment you already said, after the rules guard. It is not a guess of the words you have not said yet. A held segment stays silent until someone approves it (`POST /api/speak/async`).
+
 ## When something fails live
 Rule: don't debug on stage. Say the line, take the way out, keep talking.
 

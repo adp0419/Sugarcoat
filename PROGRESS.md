@@ -106,3 +106,17 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] R3-7 screenshots + demo.gif (22 s, 2.8 MB) regenerated from MOCK; real-run.png from :8000 (non-speaking) (2026-10-24 10:54)
   - **For T2 (README):** same names kept: `idle`, `ready`, `guard-blocked`, `playing`, `fallback-minimal`, `names-check`, `speak-twinly-offline`, `speak-job-unverified`, `watchdog-slow-edit`, `watchdog-hard-stop` (.png in docs/screenshots/), `docs/demo.gif`. New: `recording-live.png` (meter + live draft), `status-popover.png` (no_credits / auth_error), `zoom-200.png`, `real-run.png` (REAL run on :8000, demo clip, no speak). Removed: `ready-dark.png` (dark mode dropped; README line "More in docs/screenshots/ (dark theme, ...)" needs editing). README test line: e2e is now 174 checks; run `python frontend/e2e/e2e.py` (`real` case separate).
   - Note for T1: the server on :8000 still runs pre-R3 code (health says gemma ok, demo clip lands on rung `original`); restart it to get no_credits health and the rules-based self-correction rung in the demo.
+
+## Claude (branch latency: stage mode)
+- [x] `POST /api/stage/segment`: segment-only ASR (no word timestamps) -> rules rung -> rules-only guard -> render queued in the same request when consent=1 and the guard passes; held otherwise. Per-stage `timings`. GET /api/speak/{id} gains `render_started_ms` / `first_chunk_ms` (2026-10-24)
+- [x] Frontend stage mode (current UI, contained section; "One recording | Stage mode" switch): VAD on the meter's raw level, one MediaRecorder per segment (next starts before the old stops), cut at 0.9 s silence or 0.5 s when the live draft ends a clause, 12 s cap, FIFO playback, held rows (Speak anyway / Edit / Skip), half-duplex default + "headphones" full-duplex option, per-row delay + median, summary with split (2026-10-24)
+- [x] Measured. Real ASR, :8011, sentence_short (5.2 s), consent=0, no speak: server total p50 **1.4 s** (convert 25 ms, ASR 1.35-1.75 s, rules+guard <35 ms). Was 2.0 s via /api/process + polling. Browser loop (Chrome fake mic, MOCK server, muted): full duplex median **2.1 s** end-of-sentence -> audio (pause 0.5 + text 0.9 + mock voice 0.9 + wait 0). Half-duplex: same, plus waiting for the speaker's next pause.
+- Real estimate with Twinly today: pause 0.5 + text ~1.5 + Twinly render ~5.9 (QUALITY model) = **~8 s** (was ~9.1 s). **Twinly render is now ~75% of the delay.** ≤5 s needs Twinly's FAST model.
+- [ ] Question for Twinly (Ojas): the documented `/v1/voice/speak` body is only `{"text"}`. Can we pass `fast: true` / `model: "fast"` to use pocket-tts (~1 s first audio), or stream chunked audio through the API? Same $0.10/line? Safe while a QUALITY job runs? (see T1 "Latency notes" above)
+
+## Cursor
+
+Support for stage mode (branch `latency`). Claude owns `backend/*.py` and the frontend page.
+
+- [x] `POST /api/stage/segment` is in `backend/main.py` (200, session order, consent, held, timings). `SpeakStatus` returns `render_started_ms` and `first_chunk_ms`. Tests in `tests/test_stage_segment.py` cover it under MOCK=1. (2026-10-24)
+- [ ] `docs/md/10-api-contract.md` does not mention `/api/stage/segment` or the two speak timing fields yet. Claude owns that doc if it should stay next to the route. The latency budget is `docs/md/18-stage-latency.md`. Bench is `make bench-stage` (`consent=0`, no Twinly). (2026-10-24)
