@@ -60,8 +60,11 @@ def _get_client():
 
 
 def build_prompt(verbatim: str, mode: Mode, decisions: Decisions | None = None,
-                 sentences: list[str] | None = None, violations: list[str] | None = None) -> str:
+                 sentences: list[str] | None = None, violations: list[str] | None = None,
+                 protected: list[str] | None = None) -> str:
     parts = [f"MODE: {mode.upper()}"]
+    if protected:
+        parts.append("PROTECTED TERMS (spell exactly like this; the transcript may mishear them): " + ", ".join(protected))
     if decisions and decisions.available:
         issues = sorted({i for s in decisions.per_sentence for i in s.issues})
         parts.append("ISSUES (from analysis): " + (", ".join(issues) or "none"))
@@ -91,22 +94,38 @@ async def _generate(prompt: str, model: str) -> str:
     return r.text or ""
 
 
-async def _call(prompt: str) -> tuple[str, str]:
-    """429/503 -> backoff 2 s x2 -> switch to the 31b model. Returns (raw, model_used)."""
+_RATE_LIMITED = ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE")
+_SERVER_ERROR = ("500", "INTERNAL")
+
+
+async def _call(prompt: str, deadline: float) -> tuple[str, str]:
+    """At most two attempts, all inside one time budget (`deadline`, loop clock). Returns (raw, model_used).
+
+    Measured 2026-10-24: Gemma 4 on the Gemini API answers short inputs in ~16 s, returns 500 INTERNAL
+    instantly on some longer ones, and sometimes never answers. So: per-call timeout, one retry for
+    500/timeouts on the same model, 429/503 -> the 31b model; never past the budget.
+    """
+    loop = asyncio.get_running_loop()
     model, last = settings.GEMMA_MODEL, None
-    for attempt in range(3):
+    for attempt in range(2):
+        left = deadline - loop.time()
+        if left < 1:
+            break
         try:
-            return await asyncio.wait_for(_generate(prompt, model), 20), model
+            return await asyncio.wait_for(_generate(prompt, model), min(settings.GEMMA_TIMEOUT_S, left)), model
         except Exception as e:
             last = e
             msg = str(e)
-            transient = any(c in msg for c in ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE")) or isinstance(e, asyncio.TimeoutError)
-            if not transient:
+            timeout = isinstance(e, asyncio.TimeoutError)
+            if not (timeout or any(c in msg for c in _RATE_LIMITED + _SERVER_ERROR)):
                 raise
-            if attempt == 1 and model != FALLBACK_MODEL:
+            log.warning("gemma %s attempt %d failed: %s", model, attempt + 1, "timeout" if timeout else msg[:80])
+            if any(c in msg for c in _RATE_LIMITED):
                 model = FALLBACK_MODEL
-            await asyncio.sleep(RETRY_BACKOFF_S)
-    raise last  # type: ignore[misc]
+                await asyncio.sleep(min(RETRY_BACKOFF_S, max(0.0, deadline - loop.time() - 1)))
+    if isinstance(last, asyncio.TimeoutError) or last is None:
+        raise TimeoutError(f"Gemma did not answer within {settings.GEMMA_BUDGET_S:.0f} s")
+    raise last
 
 
 def _words(t: str) -> int:
@@ -147,16 +166,17 @@ def diff_edits(a: str, b: str) -> list[Edit]:
 
 
 async def run(verbatim: str, mode: Mode, decisions: Decisions | None = None,
-              violations: list[str] | None = None) -> tuple[RewriteResult, str]:
+              violations: list[str] | None = None, protected: list[str] | None = None) -> tuple[RewriteResult, str]:
     """Gemma rewrite. Returns (result, model_used). Raises on failure so the orchestrator takes the next rung."""
     if not settings.GEMINI_API_KEY:
         raise api_error("internal", "GEMINI_API_KEY is not set", "Add it to .env or run with MOCK=1.")
-    prompt = build_prompt(verbatim, mode, decisions, violations=violations)
-    raw, model = await _call(prompt)
+    deadline = asyncio.get_running_loop().time() + settings.GEMMA_BUDGET_S
+    prompt = build_prompt(verbatim, mode, decisions, violations=violations, protected=protected)
+    raw, model = await _call(prompt, deadline)
     try:
         res = parse(raw)
     except Exception:
-        raw, model = await _call(prompt + "\n\nReturn ONLY valid JSON.")
+        raw, model = await _call(prompt + "\n\nReturn ONLY valid JSON.", deadline)
         res = parse(raw)  # second failure propagates -> ladder
     bad = sanity(verbatim, res, mode)
     if bad:

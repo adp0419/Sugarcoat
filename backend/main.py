@@ -114,16 +114,17 @@ async def _decide(verbatim: str, sentences: list[str]) -> Decisions:
     return await decide.analyze(verbatim, sentences)
 
 
-async def _guard(verbatim: str, rewrite_text: str) -> GuardResult:
+async def _guard(verbatim: str, rewrite_text: str, mode: str = "natural", protected: list[str] | None = None) -> GuardResult:
     if settings.MOCK:
         return await mock.guard(verbatim, rewrite_text)
-    return await guard.check(verbatim, rewrite_text)
+    return await guard.check(verbatim, rewrite_text, mode, protected or ())
 
 
-async def _rewrite(verbatim: str, mode: Mode, decisions: Decisions | None, violations: list[str] | None):
+async def _rewrite(verbatim: str, mode: Mode, decisions: Decisions | None, violations: list[str] | None,
+                   protected: list[str] | None = None):
     if settings.MOCK:
         return await mock.rewrite(mode), "mock"
-    return await rw.run(verbatim, mode, decisions, violations)
+    return await rw.run(verbatim, mode, decisions, violations, protected)
 
 
 # ---------------------------------------------------------------- rewrite + guard with the fallback ladder
@@ -138,7 +139,8 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
 
     async def attempt(rung: str, label: str) -> bool:
         nonlocal violations, guard_unavailable, api_down
-        ok, res = await stage(st, "rewrite", lambda: _rewrite(job.verbatim, mode, job.decisions, violations),
+        ok, res = await stage(st, "rewrite", lambda: _rewrite(job.verbatim, mode, job.decisions, violations,
+                                                              job.protected_terms),
                               model=_models()["rewrite"], label=label, preview=lambda r: r[0].rewrite)
         if not ok:
             api_down = not isinstance(res, ValueError)  # ValueError covers bad JSON / sanity rejects
@@ -150,7 +152,8 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
 
     async def check(rung: str) -> bool:
         nonlocal violations, guard_unavailable
-        ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, job.rewrite), model=_models()["guard"],
+        ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, job.rewrite, mode, job.protected_terms),
+                            model=_models()["guard"],
                             preview=lambda r: ("PASS" if r.pass_ else "FAIL: " + "; ".join(v.message for v in r.violations))
                             + f" (verifier {r.verifier})")
         if not ok:
@@ -192,6 +195,20 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
     job.rewrite, job.edits, job.rung = job.verbatim, [], "original"
     job.guard = GuardResult(**{"pass": True, "verifier": "offline"})
     job.notes.append("ladder: no changes made")
+
+
+async def run_ladder_watched(st: JobState, mode: Mode, t0: float) -> None:
+    """Watchdog: whatever a stage does, the job leaves the ladder before JOB_DEADLINE_S (from t0)."""
+    left = settings.JOB_DEADLINE_S - (time.perf_counter() - t0)
+    try:
+        await asyncio.wait_for(run_ladder(st, mode), max(1.0, left))
+    except asyncio.TimeoutError:
+        job = st.job
+        log.warning("job %s hit the %.0f s watchdog", job.id, settings.JOB_DEADLINE_S)
+        await _fallback(st, "rewrite", "Took too long - using the original transcript")
+        job.rewrite, job.edits, job.rung = job.verbatim, [], "original"
+        job.guard = GuardResult(**{"pass": True, "verifier": "offline"})
+        job.notes.append("ladder: watchdog timeout - no changes made")
 
 
 async def _async(x):
@@ -240,7 +257,7 @@ async def pipeline(st: JobState, src: Path) -> None:
                                       preview=lambda _: "16 kHz mono wav")
                 if not ok:
                     return await fail(st, res, t0)
-                ok, res = await stage(st, "asr", lambda: asr.transcribe(wav), model=_models()["asr"],
+                ok, res = await stage(st, "asr", lambda: asyncio.wait_for(asr.transcribe(wav), 60), model=_models()["asr"],
                                       preview=lambda r: r.text)
         finally:
             if not settings.KEEP_AUDIO:
@@ -252,7 +269,8 @@ async def pipeline(st: JobState, src: Path) -> None:
         job.sentences = asr.split_sentences(job.verbatim, job.words)
 
         # 3 decide (failure -> unavailable, never fatal)
-        ok, d = await stage(st, "decide", lambda: _decide(job.verbatim, job.sentences), model=_models()["decide"],
+        ok, d = await stage(st, "decide", lambda: asyncio.wait_for(_decide(job.verbatim, job.sentences), 20),
+                            model=_models()["decide"],
                             preview=lambda r: f"mode={r.recommended_mode} register={r.register}" if r.available else (r.note or "unavailable"))
         job.decisions = d if ok else Decisions(available=False, recommended_mode="natural",
                                                note=f"Decisions unavailable ({d}); using Natural mode.")
@@ -260,7 +278,7 @@ async def pipeline(st: JobState, src: Path) -> None:
             job.notes.append("Decisions API unavailable - default Natural mode, deterministic guard only")
         mode = await resolve_mode(job, job.mode_requested)
 
-        await run_ladder(st, mode)
+        await run_ladder_watched(st, mode, t0)
         await finish(st, t0)
     except Exception as e:  # noqa: BLE001
         log.exception("pipeline crashed")
@@ -419,7 +437,8 @@ async def rewrite_endpoint(req: RewriteRequest):
             if not text:
                 job.status = "ready"
                 raise api_error("bad_request", "Edited text is empty.", "Type the text you want spoken.")
-            ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, text), model=_models()["guard"],
+            ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, text, job.mode_used or "natural",
+                                                            job.protected_terms), model=_models()["guard"],
                                 label="edited text",
                                 preview=lambda r: ("PASS" if r.pass_ else "FAIL: " + "; ".join(v.message for v in r.violations)))
             job.rewrite, job.edits = text, rw.diff_edits(job.verbatim, text)
@@ -431,7 +450,7 @@ async def rewrite_endpoint(req: RewriteRequest):
                     "violations": [Violation(rule="guard_error", message=f"Could not verify: {g}")]})
         else:
             job.mode_used = req.mode
-            await run_ladder(st, req.mode)  # type: ignore[arg-type]
+            await run_ladder_watched(st, req.mode, t0)  # type: ignore[arg-type]
         await finish(st, t0)
     return job
 
