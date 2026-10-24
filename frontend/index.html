@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoiceFlow</title>
+<meta name="description" content="Speak naturally. Be heard clearly. Still sound like yourself.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M7 16h2m4-6v12m4-9v6m4-8v10m4-7v4' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-state="idle">
+<a class="skip" href="#record">Skip to recorder</a>
+
+<header class="top">
+  <div>
+    <h1>VoiceFlow</h1>
+    <p class="tagline">Speak naturally. Be heard clearly. Still sound like yourself.</p>
+  </div>
+  <ul class="dots" id="health" aria-label="Service status">
+    <li><span class="dot" id="dot-asr" data-s="unknown"></span>Hearing <span class="sr-only" id="sr-asr"></span></li>
+    <li><span class="dot" id="dot-decisions" data-s="unknown"></span>Decisions <span class="sr-only" id="sr-decisions"></span></li>
+    <li><span class="dot" id="dot-gemma" data-s="unknown"></span>Gemma <span class="sr-only" id="sr-gemma"></span></li>
+    <li><span class="dot" id="dot-twinly" data-s="unknown"></span>Your voice <span class="sr-only" id="sr-twinly"></span></li>
+  </ul>
+</header>
+
+<main>
+  <div id="banner" class="banner" role="status" hidden></div>
+
+  <section class="controls" aria-labelledby="h-record">
+    <h2 id="h-record" class="sr-only">Record</h2>
+    <div class="rec-row">
+      <button id="record" class="record" type="button" aria-pressed="false">
+        <span class="rec-icon" aria-hidden="true"></span>
+        <span id="record-label">Record</span>
+      </button>
+      <div class="rec-meta">
+        <span id="timer" class="timer" aria-hidden="true">0:00 / 0:45</span>
+        <canvas id="wave" width="360" height="48" aria-hidden="true"></canvas>
+        <p class="hint" id="rec-hint">Press <kbd>Space</kbd> to start and stop. Up to 45 seconds.</p>
+      </div>
+      <button id="demo" class="secondary" type="button">Use demo clip</button>
+    </div>
+
+    <div class="opts">
+      <fieldset class="modes">
+        <legend>How much should we tidy?</legend>
+        <label><input type="radio" name="mode" value="auto" checked><span>Auto</span></label>
+        <label><input type="radio" name="mode" value="minimal"><span>Minimal</span></label>
+        <label><input type="radio" name="mode" value="natural"><span>Natural</span></label>
+        <label><input type="radio" name="mode" value="presenter"><span>Presenter</span></label>
+      </fieldset>
+      <label class="terms">Protected terms <span class="muted">(names or words to keep exactly, comma separated)</span>
+        <input id="terms" type="text" autocomplete="off" placeholder="e.g. Gator Hack, Dr. Okafor">
+      </label>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-stages">
+    <h2 id="h-stages">Progress</h2>
+    <ol class="stages" id="stages">
+      <li data-stage="convert" data-status="idle"><span class="s-name">Convert</span><span class="s-ms"></span></li>
+      <li data-stage="hear" data-status="idle"><span class="s-name">Hear</span><span class="s-ms"></span></li>
+      <li data-stage="decide" data-status="idle"><span class="s-name">Decide</span><span class="s-ms"></span></li>
+      <li data-stage="edit" data-status="idle"><span class="s-name">Edit</span><span class="s-ms"></span></li>
+      <li data-stage="verify" data-status="idle"><span class="s-name">Verify</span><span class="s-ms"></span></li>
+      <li data-stage="ready" data-status="idle"><span class="s-name">Ready</span><span class="s-ms"></span></li>
+    </ol>
+    <p id="status" class="status" role="status" aria-live="polite">Ready when you are.</p>
+    <p id="rung" class="rung" hidden></p>
+  </section>
+
+  <div id="error" class="error" role="alert" hidden>
+    <strong id="error-msg"></strong>
+    <span id="error-hint"></span>
+    <button id="error-dismiss" class="secondary" type="button">Dismiss</button>
+  </div>
+
+  <section id="result" class="result" hidden aria-labelledby="h-result">
+    <h2 id="h-result" class="sr-only">Result</h2>
+    <div class="cols">
+      <article class="col" aria-labelledby="h-said">
+        <h3 id="h-said">What you said</h3>
+        <p id="verbatim" class="text"></p>
+        <p class="muted small">Fillers are underlined with a dotted line.</p>
+      </article>
+      <article class="col" aria-labelledby="h-spoken">
+        <h3 id="h-spoken">What will be spoken</h3>
+        <p id="diff" class="text diff" aria-label="Rewrite with changes marked"></p>
+        <p class="muted small"><ins>Added</ins> text is underlined, <del>removed</del> text is struck through. Hover or focus a change to see why.</p>
+        <label for="final-text" class="edit-label">Edit the final text if you like</label>
+        <textarea id="final-text" rows="4"></textarea>
+        <div class="row">
+          <button id="copy" class="secondary" type="button">Copy text</button>
+          <span id="copy-note" class="muted small" role="status"></span>
+        </div>
+      </article>
+    </div>
+
+    <div class="panels">
+      <section class="panel" aria-labelledby="h-dec">
+        <h3 id="h-dec">What we noticed</h3>
+        <div id="chips" class="chips"></div>
+        <ul id="bars" class="bars"></ul>
+      </section>
+      <section class="panel" aria-labelledby="h-guard">
+        <h3 id="h-guard">Meaning check</h3>
+        <p id="guard-verdict" class="verdict"></p>
+        <ul id="guard-rules" class="rules"></ul>
+        <p id="guard-note" class="muted small"></p>
+      </section>
+    </div>
+
+    <details class="panel trace">
+      <summary>How it was made (trace)</summary>
+      <table>
+        <thead><tr><th scope="col">Stage</th><th scope="col">Time</th><th scope="col">Model</th><th scope="col">Note</th></tr></thead>
+        <tbody id="trace"></tbody>
+      </table>
+    </details>
+
+    <section class="actions" aria-labelledby="h-actions">
+      <h3 id="h-actions" class="sr-only">Actions</h3>
+      <label id="override-wrap" class="override" hidden>
+        <input type="checkbox" id="override">
+        <span>The meaning check flagged this text. I have read it and I want it spoken anyway.</span>
+      </label>
+      <div class="row">
+        <button id="speak" class="primary" type="button" disabled>Approve &amp; speak in my voice</button>
+        <button id="original" class="secondary" type="button" disabled>Play original recording</button>
+        <button id="another" class="secondary" type="button">Try another mode</button>
+      </div>
+      <label class="dev"><input type="checkbox" id="bad"> <span>Simulate bad rewrite <span class="muted">(dev: injects a wrong day to show the guard)</span></span></label>
+    </section>
+
+    <section id="output" class="output" hidden aria-labelledby="h-out">
+      <h3 id="h-out">Your voice</h3>
+      <p class="synthetic">Generated in your voice with Twinly. This audio is synthetic.</p>
+      <audio id="player" controls preload="auto"></audio>
+      <p id="play-state" class="status" role="status" aria-live="polite"></p>
+      <p id="out-meta" class="muted small"></p>
+      <div id="downloads" class="row"></div>
+    </section>
+  </section>
+</main>
+
+<footer>
+  <p>Built with accessibility in mind. Your audio is deleted after transcription. VoiceFlow only speaks in the voice of the person who owns the Twinly key, and only after you approve the text.</p>
+  <p>MIT licensed. CrisperWhisper weights are non-commercial and are not bundled. <a href="https://github.com/adp0419/VoiceFlow">GitHub</a></p>
+  <p class="dev"><label><input type="checkbox" id="mock-toggle"> Offline demo data (no server needed)</label></p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

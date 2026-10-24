@@ -1,0 +1,52 @@
+{
+  "id": "mock-0001",
+  "status": "ready",
+  "mode_used": "natural",
+  "rung": "full",
+  "verbatim": "So um the team meeting is on uh Friday at five p m, no wait, sorry, Monday at five p m. And and everyone should bring their laptops.",
+  "sentences": [
+    "So um the team meeting is on uh Friday at five p m, no wait, sorry, Monday at five p m.",
+    "And and everyone should bring their laptops."
+  ],
+  "decisions": {
+    "predicates": {
+      "has_filler": 0.98,
+      "has_repetition": 0.91,
+      "has_self_correction": 0.97,
+      "has_false_start": 0.12,
+      "is_incomplete_thought": 0.05,
+      "contains_hedging": 0.04,
+      "is_already_fluent": 0.01
+    },
+    "register": "announcement",
+    "recommended_mode": "presenter",
+    "per_sentence": []
+  },
+  "rewrite": "The team meeting is on Monday at five p m. Everyone should bring their laptops.",
+  "edits": [
+    { "from": "So um", "to": "", "reason": "Removed filler words" },
+    { "from": "uh Friday at five p m, no wait, sorry,", "to": "", "reason": "Self-correction: you changed Friday to Monday, so only Monday is kept" },
+    { "from": "And and", "to": "", "reason": "Removed repeated word" }
+  ],
+  "guard": {
+    "pass": true,
+    "violations": [],
+    "decisions_probs": {
+      "meaning_preserved": 0.97,
+      "added_new_information": 0.02,
+      "dropped_hedge_or_uncertainty": 0.01,
+      "changed_commitment_strength": 0.03,
+      "changed_number_date_or_name": 0.04,
+      "negation_changed": 0.01
+    },
+    "verifier": "online"
+  },
+  "trace": [
+    { "stage": "convert", "ok": true, "ms": 140, "model": "ffmpeg", "preview": "16 kHz mono wav" },
+    { "stage": "asr", "ok": true, "ms": 2300, "model": "crisperwhisper", "preview": "So um the team meeting..." },
+    { "stage": "decide", "ok": true, "ms": 820, "model": "gpt-6-luna", "preview": "register=announcement" },
+    { "stage": "rewrite", "ok": true, "ms": 1900, "model": "gemma-4", "preview": "The team meeting is on Monday..." },
+    { "stage": "guard", "ok": true, "ms": 640, "model": "rules + gpt-6-luna", "preview": "pass" }
+  ],
+  "timings": { "total_ms": 5800 }
+}
