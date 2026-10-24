@@ -198,7 +198,8 @@ class TwinlyClient:
         try:
             self.log_dir.mkdir(parents=True, exist_ok=True)
             row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "hash": h[:12], "chars": len(text), "ms": ms,
-                   "posts": stats["posts"], "polls": stats["polls"], "first_status": stats["first_status"],
+                   "queue_ms": stats.get("queue_ms", 0), "posts": stats["posts"], "polls": stats["polls"],
+                   "first_status": stats["first_status"],
                    "seconds": seconds, "bytes": size}
             with (self.log_dir / "twinly_renders.jsonl").open("a") as f:
                 f.write(json.dumps(row) + "\n")
@@ -337,8 +338,10 @@ class TwinlyClient:
 
     async def _render(self, text: str, h: str) -> AudioChunk:
         stats = {"posts": 0, "polls": 0}
-        t_start = time.perf_counter()
+        t_queued = time.perf_counter()
         async with self.sem:
+            t_start = time.perf_counter()  # latency excludes the wait for the previous chunk
+            stats["queue_ms"] = int((t_start - t_queued) * 1000)
             self.in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self.in_flight)
             try:
@@ -465,7 +468,7 @@ def _get_client() -> TwinlyClient:
 
 
 def _mock_speak(text: str) -> SpeakResponse:
-    """MOCK=1: copy the placeholder tone into the cache under the real hash so the file route works."""
+    """MOCK=1: copy the backup clip (real cloned voice, canonical line) into the cache under the chunk hash."""
     t0 = time.perf_counter()
     src = settings.fixtures_dir / "backup_demo.m4a"
     out = []
@@ -473,7 +476,7 @@ def _mock_speak(text: str) -> SpeakResponse:
         h = hashlib.sha256(f"{c}\x00mock".encode()).hexdigest()
         settings.cache_dir.mkdir(parents=True, exist_ok=True)
         dst = settings.cache_dir / f"{h}.m4a"
-        if src.exists() and not dst.exists():
+        if src.exists() and (not dst.exists() or dst.stat().st_size != src.stat().st_size):  # refresh stale copies
             shutil.copyfile(src, dst)
         out.append(AudioChunk(url=f"/api/audio/{h}.m4a", seconds=3.0, cached=False))
     return SpeakResponse(chunks=out, total_seconds=3.0 * len(out), ms=int((time.perf_counter() - t0) * 1000))

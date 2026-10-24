@@ -364,3 +364,13 @@ def test_render_log_redacts_audio(tmp_path):
     assert row["posts"] == 1 and row["chars"] == len("Logged line.") and row["seconds"] == 2.5
     last = (tmp_path / "logs" / "twinly_last_ok.json").read_text()
     assert AUDIO not in last and f"<base64, {len(AUDIO)} chars>" in last
+
+
+def test_real_success_shape_http200_done_job(tmp_path):
+    """Captured at G1 through /api/speak (fixtures/real_twinly_speak_ok.json): 200 + finished job, result.audio_b64."""
+    body = json.loads((voice.settings.fixtures_dir / "real_twinly_speak_ok.json").read_text())["twinly_job_body"]
+    body = json.loads(json.dumps(body))
+    body["result"]["audio_b64"] = AUDIO
+    f = Fake(posts=[(200, body)])
+    res = run(make(tmp_path, f).speak("And this second line has different words, so it is its own job."))
+    assert f.post_calls == 1 and f.get_calls == 0 and res.chunks[0].seconds == 3.6

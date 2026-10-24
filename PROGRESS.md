@@ -38,19 +38,19 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] 2  voice.py client + 20 tests + MOCK path (2026-10-23 23:50). G1 PARTIAL: real call returns voice_not_set_up; Mac owner must Build my clone, then re-run `python -m backend.voice "Hello, this is a test."` once
 - [x] 3  guard Decisions verifier pass: `guard.check` runs rules + `decide.verify` in parallel, offline degrade (5 combined tests) (2026-10-23 23:55)
 - [x] 5  eval/utterances.json (8 cases) + eval/run_eval.py, `--offline` works (2026-10-23 23:53)
-- [ ] 4  verified on real APIs (needs: Twinly "Build my clone"; OpenAI credits) then re-run G1/G2 once each
+- [x] 4  G1 Twinly verified on real API 2026-10-24 (round 3); G2 Decisions still 429 no credits
 
 ### T2 Round 2
 - [x] R2-1 voice_starting-in-200-job fix committed + tests (2026-10-24 00:35)
-- [ ] R2-2 G1 real audio: BLOCKED, voice engine `voice_starting` (2 real POSTs used, 3 left); user must quit+reopen Twinly. Raw capture saved; retry loop now fits the 60 s cap (2026-10-24 00:45)
+- [x] R2-2 G1 real audio: DONE in round 3 (R3-1). Was BLOCKED, voice engine `voice_starting` (2 real POSTs used, 3 left); user must quit+reopen Twinly. Raw capture saved; retry loop now fits the 60 s cap (2026-10-24 00:45)
 - [ ] R2-3 G2 real Decisions: BLOCKED, still 429 no credits; added `decide.health()` real probe (2026-10-24 00:46)
 - [x] R2-4 guard vs realistic rewrites: 61-case corpus, FP 4/37 -> 0/36, FN 5/30 -> 3/31 (n=67) (2026-10-24 00:48)
 - [x] R2-5 deadlines: analyze 15 s, verify 10 s, guard never raises; voice-identity cache + spend-cap tests (2026-10-24 00:46)
 - [ ] R2-6 eval/RESULTS.md from a real run (running)
 
-### T2 Round 3 (real-call budget: 15 lines; used so far: 4)
-- [ ] R3-1 G1 via /api/speak: 1-chunk + 3-chunk, ordering, concurrent, cache hit, ffprobe, fixtures/real_twinly_speak_ok.json
-- [ ] R3-2 fixtures/backup_demo.m4a = real cloned voice; MOCK + fallback path checked
+### T2 Round 3 (real-call budget: 15 lines; used so far: 9)
+- [x] R3-1 G1 DONE via /api/speak (MOCK=0, :8001): 1 chunk 68 chars 5.3 s; 3 chunks (507/529/134 chars) 28.6 s, in order (ASR-checked), 57 s audio; repeat = cache hit 10 ms, 0 spend; 3 concurrent requests (2 identical) = 2 lines, serialised; every file AAC 24 kHz mono (ffprobe). Render 4.2-14.1 s per chunk. fixtures/real_twinly_speak_ok.json (2026-10-24 10:33)
+- [x] R3-2 fixtures/backup_demo.m4a = canonical line in the owner's cloned voice (3.84 s, ASR: "Our meeting will take place on Monday at five PM. Everyone should attend."); MOCK /api/speak + /api/audio/backup_demo.m4a and voice MOCK cache copy both serve it (stale copies refreshed) (2026-10-24 10:35). For T1: mock.speak still says seconds=3.0 (real 3.84); fixtures/README.md still calls it a tone
 - [x] R3-3 voice.py from real runs: 2 concurrent jobs crash Twinly's MLX engine -> one at a time; voice_failed re-posted once; identical chunks share one render; render survives the 60 s cap (paid audio lands in cache); per-chunk latency log + redacted last ok/fail body in logs/ (+6 tests) (2026-10-24 10:40)
 - [x] R3-4 guard: 3 known FNs fixed (dropped phrase, added list item, reordered roles) + dropped condition + "let me rephrase" marker; 13 new held-out cases (before the condition rule: 0/8 FP, 2/5 FN); corpus n=80: FP 0/44, FN 1/36 (ho_role_swap); T1 self-correction tests pass check_rules (2026-10-24 10:45)
 - [ ] R3-5 eval/RESULTS.md (real pipeline, rung per output, guard corpus, Twinly latency)
