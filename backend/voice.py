@@ -16,11 +16,13 @@ import base64
 import binascii
 import copy
 import hashlib
+import fcntl
 import json
 import os
 import shutil
 import sys
 import time
+import weakref
 from collections import deque
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -29,7 +31,7 @@ import httpx
 
 from . import split
 from .config import settings
-from .errors import api_error
+from .errors import ApiError, api_error
 from .models import AudioChunk, SpeakResponse, TwinlyHealth
 
 CHUNK_CHARS = 550          # packer limit (Twinly accepts <=600)
@@ -37,23 +39,23 @@ MAX_TOTAL_CHARS = 2400
 # Twinly docs allow 2 Mac jobs at once, but two concurrent voice.speak jobs crash its MLX voice engine
 # ("There is no Stream(gpu, 12) in current thread", 2026-10-24; DIFFICULTIES.md), failing both. Serialise.
 MAX_CONCURRENT = 1
-VOICE_FAILED_RETRY_S = 3.0  # the engine restarts itself in ~2 s after a crash
 RATE_PER_MIN = 30
 JOB_TIMEOUT_S = 60.0
-RENDER_BUDGET_S = 55.0     # main.py cancels voice.speak at 60 s; never start an attempt that can't finish
 LINE_COST_USD = 0.10
 SPEND_CAP_LINES = 150
 HEALTH_TTL_S = 30.0
+
+_ACCOUNT_LIMITERS = weakref.WeakKeyDictionary()
 
 _TERMINAL_FAIL = {"failed", "canceled", "expired"}
 
 
 class _VoiceStarting(Exception):
-    """Twinly's voice engine is still warming up; the speak job should be re-posted."""
+    """An accepted job reports voice_starting; it must not be automatically re-POSTed."""
 
 
 class _VoiceFailed(Exception):
-    """The job ran and failed with no audio (e.g. engine crash). Safe to re-post once: nothing was spoken."""
+    """The accepted job failed with no audio; preserve its identity instead of re-POSTing."""
 
     def __init__(self, resp: httpx.Response, code: str):
         super().__init__(code)
@@ -243,18 +245,17 @@ class TwinlyClient:
 
     async def _post_speak(self, text: str, stats: dict | None = None) -> httpx.Response:
         n429 = starting = 0
-        retried503 = False
         while True:
             self._spend_check()
             await self.limiter.acquire()
             try:
                 r = await self.http.post(f"{self.base}/voice/speak", params={"wait": 25}, json={"text": text})
             except httpx.HTTPError as e:  # not retried: the job may already exist
-                raise api_error("twinly_offline", f"Could not reach Twinly ({type(e).__name__}).",
+                raise api_error("job_unverified", f"Could not confirm submission to Twinly ({type(e).__name__}).",
                                 "Check wifi and that the Twinly Mac app is awake.")
             if stats is not None:
                 stats["posts"] += 1
-                stats.setdefault("first_status", r.status_code)
+                stats["first_status"] = stats["first_status"] or r.status_code
             if r.status_code in (200, 202):
                 self._spend_add()
                 return r
@@ -275,17 +276,18 @@ class TwinlyClient:
                 starting += 1
                 await self.sleep(5)
                 continue
-            if r.status_code == 503 and code != "job_unverified" and not retried503:
-                retried503 = True
-                await self.sleep(1)
-                continue
-            raise self._raise_for(r, code)
+            error = self._raise_for(r, code)
+            error.safe_to_retry = r.status_code == 409 and code in ("voice_not_set_up", "twinly_offline", "voice_starting")
+            raise error
 
-    async def _await_job(self, first: httpx.Response, stats: dict | None = None) -> dict:
+    async def _await_job(self, first: httpx.Response, stats: dict | None = None, journal: Path | None = None) -> dict:
         body = _json(first)
         deadline = self.clock() + JOB_TIMEOUT_S
         resp, data = first, body
         while True:
+            job_id = _find(data, "id") or _find(data, "job_id")
+            if journal is not None and job_id:
+                self._journal_write(journal, {"job_id": str(job_id)})
             if _find(data, "audio_b64"):
                 return data
             status = str(_find(data, "status") or "").lower()
@@ -336,40 +338,81 @@ class TwinlyClient:
         if not fut.cancelled():
             fut.exception()  # mark retrieved: a render nobody waits for anymore must not warn
 
+    @staticmethod
+    def _journal_write(path: Path, data: dict) -> None:
+        # Atomic + fsync before the paid POST; an uncertain outcome must survive a crash.
+        tmp = path.with_suffix(".tmp")
+        with tmp.open("w") as f:
+            json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
     async def _render(self, text: str, h: str) -> AudioChunk:
-        stats = {"posts": 0, "polls": 0}
-        t_queued = time.perf_counter()
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        limiters = _ACCOUNT_LIMITERS.setdefault(asyncio.get_running_loop(), {})
+        self.limiter = limiters.setdefault((self.base, self.voice_id), self.limiter)
+        # Also serializes clients and server processes sharing this cache and provider endpoint.
+        engine = hashlib.sha256(self.base.encode()).hexdigest()
+        with (self.cache_dir / f".engine-{engine}.lock").open("a") as lock:
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    await asyncio.sleep(0.02)
+            try:
+                hit = self._cached(h)
+                if hit:
+                    return hit
+                journal = self.cache_dir / f"{h}.request.json"
+                prior = None
+                if journal.exists():
+                    try:
+                        prior = json.loads(journal.read_text())
+                    except (ValueError, OSError):
+                        prior = {}
+                    if not prior.get("job_id"):
+                        raise api_error("job_unverified", "A previous submission has an uncertain outcome.",
+                                        "Reconcile this request in Twinly; no new paid request was sent.")
+                else:
+                    self._journal_write(journal, {"state": "submitting"})
+                try:
+                    result = await self._render_network(text, h, journal, prior)
+                except ApiError as e:
+                    # Explicit pre-submission rejections are safe to try later. All ambiguous/paid failures remain.
+                    if getattr(e, "safe_to_retry", False):
+                        journal.unlink(missing_ok=True)
+                    raise
+                journal.unlink(missing_ok=True)
+                return result
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    async def _render_network(self, text: str, h: str, journal: Path, prior: dict | None) -> AudioChunk:
+        stats = {"posts": 0, "polls": 0, "first_status": None}
+        t_start = time.perf_counter()
         async with self.sem:
-            t_start = time.perf_counter()  # latency excludes the wait for the previous chunk
-            stats["queue_ms"] = int((t_start - t_queued) * 1000)
             self.in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self.in_flight)
             try:
-                started = self.clock()
-                failed_retried = False
-                for attempt in range(4):  # docs/md/04: voice_starting -> wait 5 s, retry up to 3x
-                    t_try = self.clock()
-                    first = await self._post_speak(text, stats)
-                    try:
-                        data = await self._await_job(first, stats)
-                        break
-                    except _VoiceStarting:
-                        # A real voice_starting job fails after ~43 s (fixtures/real_twinly_voice_starting.json):
-                        # only re-post if another attempt that long still fits in the budget.
-                        took = self.clock() - t_try
-                        if attempt == 3 or (self.clock() - started) + 5 + took > RENDER_BUDGET_S:
-                            raise api_error("internal", "Twinly voice is still starting.",
-                                            "Quit and reopen the Twinly app so its voice engine starts, then retry.")
-                        await self.sleep(5)
-                    except _VoiceFailed as e:
-                        took = self.clock() - t_try
-                        if failed_retried or (self.clock() - started) + VOICE_FAILED_RETRY_S + took > RENDER_BUDGET_S:
-                            raise self._raise_for(e.resp, e.code)
-                        failed_retried = True
-                        await self.sleep(VOICE_FAILED_RETRY_S)
+                if prior:
+                    # Reconcile a known job by GET only. Never re-POST an uncertain line.
+                    first = await self.http.get(f"{self.base}/jobs/{prior['job_id']}", params={"wait": 25})
+                    if first.status_code >= 400:
+                        raise api_error("job_unverified", "Could not reconcile the previous voice job.", "Check Twinly.")
                 else:
-                    raise api_error("internal", "Twinly could not render the voice.",
-                                    "Quit and reopen the Twinly app, then retry.")
+                    first = await self._post_speak(text, stats)
+                try:
+                    data = await self._await_job(first, stats, journal)
+                except (_VoiceStarting, _VoiceFailed):
+                    raise api_error("job_unverified", "The submitted voice job failed or is still starting.",
+                                    "Check Twinly before resolving the saved request; no automatic resend.")
             finally:
                 self.in_flight -= 1
         b64 = _find(data, "audio_b64")
@@ -397,7 +440,7 @@ class TwinlyClient:
             raise api_error("too_long", f"Text is {len(text)} characters (max {MAX_TOTAL_CHARS}).",
                             "Shorten the announcement.")
         chunks = split.pack(text, CHUNK_CHARS)
-        results = await asyncio.gather(*(self.render(c) for c in chunks))  # gather keeps order
+        results = [await self.render(c) for c in chunks]  # stop before paying for later chunks on failure
         return SpeakResponse(chunks=list(results), total_seconds=round(sum(c.seconds for c in results), 2),
                              ms=int((time.perf_counter() - t0) * 1000), synthetic=True)
 

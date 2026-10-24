@@ -113,9 +113,9 @@ def test_ttl_cleanup():
     asyncio.run(go())
 
 
-def test_async_speak_endpoint_mock():
+def test_async_speak_endpoint_mock(approved_speech):
     with TestClient(main.app) as c:
-        r = c.post("/api/speak/async", json={"job_id": "x", "text": "Our meeting is on Monday."})
+        r = c.post("/api/speak/async", json=approved_speech("Our meeting is on Monday.", "x"))
         assert r.status_code == 202
         sid = r.json()["speak_id"]
         for _ in range(100):
@@ -127,10 +127,10 @@ def test_async_speak_endpoint_mock():
         assert s["chunks"][0]["url"] == "/api/audio/backup_demo.m4a" and s["chunks"][0]["seconds"] == 3.84
         assert c.get(s["chunks"][0]["url"]).headers["content-type"] == "audio/mp4"
         assert c.post("/api/speak/async", json={"job_id": "x", "text": " "}).status_code == 400
-        assert c.post("/api/speak/async", json={"job_id": "x", "text": "a" * 2401}).status_code == 413
+        assert c.post("/api/speak/async", json={"job_id": "x", "text": "a" * 2401, "revision": 0}).status_code == 413
         assert c.get("/api/speak/nope").json()["error"]["code"] == "not_found"
         # the blocking endpoint is unchanged
-        b = c.post("/api/speak", json={"job_id": "x", "text": "Hello"}).json()
+        b = c.post("/api/speak", json=approved_speech("Hello", "x")).json()
         assert b["chunks"][0]["seconds"] == 3.84
 
 
@@ -208,15 +208,15 @@ def _pipeline(src, fast):
     return st.job, time.perf_counter() - t
 
 
-def test_fast_path_skips_decisions_retry_and_verifier(real):
+def test_fast_path_skips_analysis_retry_but_keeps_verifier(real):
     calls, src = real
     job, secs = _pipeline(src, fast=True)
     assert job.status == "ready" and job.rung == "minimal" and job.guard.pass_
-    assert job.rewrite == "So the meeting is on Monday at 5 PM."
-    assert calls["decide"] == 0 and calls["verify"] == 0 and calls["gemma"] == 1
+    assert job.rewrite == "So the meeting is on Friday, no wait, Monday at 5 PM."
+    assert calls["decide"] == 0 and calls["verify"] >= 1 and calls["gemma"] == 1
     assert secs < 1.5  # Gemma capped at FAST_GEMMA_S, no stricter retry
     labels = [(t.stage, t.model) for t in job.trace]
-    assert ("decide", "skipped (fast mode)") in labels and ("guard", "rules only (fast mode)") in labels
+    assert ("decide", "skipped") in labels and ("guard", main.RULES_ONLY) in labels
     assert not any("retry" in (t.preview or "") for t in job.trace)
 
 
@@ -228,12 +228,12 @@ def test_fast_path_skips_gemma_after_a_recent_402(real):
     assert any(t.stage == "rewrite" and t.error and "no_credits" in t.error for t in job.trace)
 
 
-def test_without_fast_nothing_changes_and_trace_is_honest(real):
+def test_normal_path_skips_analysis_and_trace_is_honest(real):
     calls, src = real
     job, _ = _pipeline(src, fast=False)
-    assert calls["decide"] == 1 and calls["verify"] >= 1 and calls["gemma"] >= 1
+    assert calls["decide"] == 0 and calls["verify"] >= 1 and calls["gemma"] >= 1
     d = next(t for t in job.trace if t.stage == "decide")
-    assert d.ok is False and d.model == main.RULES_ONLY and "credit_balance_exhausted" in d.error
+    assert d.ok and d.model == "skipped"
     g = [t for t in job.trace if t.stage == "guard"][-1]
     assert g.model == main.RULES_ONLY
     assert job.rung == "minimal" and job.guard.pass_

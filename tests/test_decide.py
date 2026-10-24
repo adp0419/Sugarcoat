@@ -217,7 +217,7 @@ def test_guard_goes_offline_when_verifier_hangs(monkeypatch):
     t = time.perf_counter()
     res = run(guard.check("meet Monday at 5 pm", "Meet Monday at 5 PM."))
     assert time.perf_counter() - t < 1.5
-    assert res.pass_ and res.verifier == "offline"
+    assert not res.pass_ and res.verifier == "offline"
 
 
 def test_analyze_never_raises_on_garbage(monkeypatch):

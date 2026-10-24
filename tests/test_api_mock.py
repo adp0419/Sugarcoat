@@ -1,3 +1,4 @@
+import time
 """Contract smoke test against the MOCK=1 server (no network)."""
 import json
 import os
@@ -33,7 +34,7 @@ def test_full_flow():
         stages = [d["stage"] for e, d in events if e == "stage" and d["status"] == "done"]
         assert stages == ["convert", "asr", "decide", "rewrite", "guard"]
         job = c.get(f"/api/jobs/{jid}").json()
-        assert job["status"] == "ready" and job["rung"] == "full" and job["mode_used"] == "presenter"
+        assert job["status"] == "ready" and job["rung"] == "full" and job["mode_used"] == "natural"
         assert "Monday" in job["rewrite"] and "Friday" not in job["rewrite"]
         assert job["guard"]["pass"] is True and job["edits"][0]["from"]
         assert [t["stage"] for t in job["trace"]] == ["convert", "asr", "decide", "rewrite", "guard"]
@@ -43,9 +44,14 @@ def test_full_flow():
         assert bad["guard"]["pass"] is False and bad["guard"]["violations"]
 
         again = c.post("/api/rewrite", json={"job_id": jid, "mode": "minimal"}).json()
+        for _ in range(100):
+            again = c.get(f"/api/jobs/{jid}").json()
+            if again["status"] == "ready":
+                break
+            time.sleep(0.05)
         assert again["mode_used"] == "minimal" and again["rung"] == "full"
 
-        s = c.post("/api/speak", json={"job_id": jid, "text": "Hello"}).json()
+        s = c.post("/api/speak", json={"job_id": jid, "text": again["rewrite"], "revision": again["revision"], "approved": True}).json()
         assert s["chunks"][0]["url"].endswith(".m4a")
         a = c.get(s["chunks"][0]["url"])
         assert a.status_code == 200 and a.headers["content-type"] == "audio/mp4"
@@ -55,7 +61,7 @@ def test_errors():
     with TestClient(app) as c:
         e = c.post("/api/speak", json={"job_id": "x", "text": ""})
         assert e.status_code == 400 and e.json()["error"]["code"] == "bad_request"
-        e = c.post("/api/speak", json={"job_id": "x", "text": "a" * 2401})
+        e = c.post("/api/speak", json={"job_id": "x", "text": "a" * 2401, "revision": 0})
         assert e.status_code == 413 and e.json()["error"]["code"] == "too_long"
         assert c.get("/api/jobs/nope").json()["error"]["code"] == "not_found"
         e = c.post("/api/process", files={"audio": ("a.webm", b"0" * (10 * 1024 * 1024 + 1), "audio/webm")})

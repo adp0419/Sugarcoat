@@ -140,3 +140,7 @@ HTTP 200 with the finished job every time, never 202). Durations checked with `f
 - Long texts: a 2,400-char text is 5 chunks at ~14 s each, which is longer than the server's 60 s speak cap. The first
   request times out, the renders keep going in the background, and the retry plays from cache without paying again.
 
+
+## Optimization follow-up (2026-10-24)
+
+See [the optimization report](../docs/OPTIMIZATION_2026-10-24.md) for reproducible comparisons on `rohit-optimize`: controlled pipeline **1.56× faster (35.7% less time)**, first-chunk backend availability **2.99× earlier**, and modeled live-ASR input work **73.3% lower**. These are not live paid-provider speedups. Offline unsafe approvals fell **12/48 → 0/48** on the expanded set, while valid auto-approval coverage fell **47/47 → 10/47** because substantive changes now require an available independent verifier. The existing historical rows above are unchanged.

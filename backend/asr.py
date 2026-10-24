@@ -9,11 +9,12 @@ import re
 import subprocess
 import sys
 import time
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .config import settings
-from .errors import api_error
+from .errors import ApiError, api_error
 from .models import ASRResult, Word
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")  # must be set before torch loads
@@ -23,6 +24,8 @@ logging.getLogger("crisperwhisper").setLevel(logging.WARNING)  # per-chunk INFO 
 log = logging.getLogger("voiceflow.asr")
 
 _model = None
+_load_future = None
+_inference = None
 _pool = ThreadPoolExecutor(max_workers=1)  # one worker: model memory
 SILENCE_DB = -50.0
 
@@ -47,7 +50,7 @@ def split_sentences(verbatim: str, words: list[Word] | None = None) -> list[str]
 
 
 def loaded() -> bool:
-    return _model is not None
+    return _model is not None and (_load_future is None or _load_future.done())
 
 
 def _load_sync():
@@ -65,31 +68,53 @@ def _load_sync():
     log.info("CrisperWhisper(%s) loaded in %.1fs", settings.ASR_SIZE, time.time() - t)
 
 
-async def load() -> None:
-    """Load once at startup, then warm up with 1 s of silence."""
-    if _model is None:
-        await asyncio.get_running_loop().run_in_executor(_pool, _load_sync)
+def _load_and_warm():
+    _load_sync()
     try:
         import numpy as np
-        await asyncio.get_running_loop().run_in_executor(
-            _pool, lambda: _model.transcribe(np.zeros(16000, dtype="float32"), sr=16000, mode="verbatim"))
-    except Exception as e:  # warm-up is best effort
+        _model.transcribe(np.zeros(16000, dtype="float32"), sr=16000, mode="verbatim")
+    except Exception as e:
         log.warning("ASR warm-up failed: %s", e)
+
+
+async def load() -> None:
+    """Single flight, including warmup; cancelled callers do not cancel model initialization."""
+    global _load_future
+    if _model is not None and (_load_future is None or _load_future.done()):
+        return
+    if _load_future is None or (_load_future.done() and _load_future.exception()):
+        _load_future = _pool.submit(_load_and_warm)
+    await asyncio.shield(asyncio.wrap_future(_load_future))
+
+
+def busy() -> bool:
+    return _inference is not None and not _inference.done()
 
 
 async def _run(*args: str) -> tuple[int, str]:
     p = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-    out, _ = await p.communicate()
+    try:
+        out, _ = await asyncio.wait_for(p.communicate(), 15)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        if p.returncode is None:
+            p.kill()
+        await p.communicate()
+        raise
     return p.returncode, out.decode(errors="replace")
 
 
-async def convert(src: Path, dst: Path, max_seconds: float | None = None) -> None:
-    """Any browser format -> 16 kHz mono wav (optionally only the first `max_seconds`)."""
-    cap = ["-t", str(max_seconds)] if max_seconds else []
+async def convert(src: Path, dst: Path, max_seconds: float | None = None, start_seconds: float = 0) -> None:
+    """Browser audio -> bounded 16 kHz mono WAV, optionally starting at a window offset."""
+    cap = ["-ss", str(start_seconds), "-t", str(max_seconds or 46)]
     rc, out = await _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(src), *cap, "-ar", "16000", "-ac", "1", str(dst))
     if rc != 0 or not dst.exists():
         # the upload is not decodable audio: the client's problem, so 422 rather than 500
         raise api_error("asr_failed", "Could not read the recording.", "Try recording again (Chrome or Safari).", 422)
+
+    if max_seconds is None:
+        with wave.open(str(dst)) as recording:
+            if recording.getnframes() / recording.getframerate() > 45.05:
+                raise api_error("too_long", "Recording exceeds 45 seconds.", "Record a shorter clip.")
 
 
 async def mean_volume_db(wav: Path) -> float | None:
@@ -127,26 +152,34 @@ def _transcribe_sync(wav: Path, word_timestamps: bool = True) -> ASRResult:
 async def transcribe(wav: Path, word_timestamps: bool = True) -> ASRResult:
     """RMS gate -> CrisperWhisper in the executor -> hallucination gate. Raises ApiError no_speech/asr_failed.
     word_timestamps=False is for /api/live drafts (no sentence splitting needed)."""
+    global _inference
     db = await mean_volume_db(wav)
     if db is None or db < SILENCE_DB:
         raise api_error("no_speech", "Couldn't hear anything.", "Check your microphone and try again.")
-    if _model is None:
+    if not loaded():
         await load()
     try:
-        res = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(_pool, _transcribe_sync, wav, word_timestamps), 60)
+        if busy() and word_timestamps:
+            await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(_inference)), 10)
+        if busy():
+            raise api_error("busy", "The inference worker is still occupied.", "Wait for the current transcription.")
+        _inference = _pool.submit(_transcribe_sync, wav, word_timestamps)
+        res = await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(_inference)), 60)
     except asyncio.TimeoutError:
         raise api_error("asr_failed", "Transcription timed out.", "Try a shorter recording.")
+    except ApiError:
+        raise
     except Exception as e:
         log.exception("ASR failed")
         raise api_error("asr_failed", f"Transcription failed: {type(e).__name__}", "Try again; see server log.")
-    if not res.text.strip() or _repeated_ngrams(res.text):
+    if not res.text.strip():
         raise api_error("no_speech", "Couldn't hear anything.", "Speak closer to the mic and try again.")
     return res
 
 
 async def process_upload(src: Path, work: Path) -> tuple[ASRResult, int]:
     """convert + transcribe; deletes audio files afterwards unless KEEP_AUDIO=1. Returns (result, convert_ms)."""
-    wav = work.with_suffix(".wav")
+    wav = work.with_suffix(".converted.wav")
     try:
         t = time.time()
         await convert(src, wav)

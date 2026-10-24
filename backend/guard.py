@@ -699,9 +699,9 @@ _VERIFY_TEXT = {
 
 async def check(verbatim: str, rewrite: str, mode: str = "natural",
                 protected: Iterable[str] = ()) -> models.GuardResult:
-    """Orchestrator entry point: deterministic rules and the Decisions verifier run in parallel.
+    """Orchestrator entry point: local checks, then independent verification when needed.
 
-    pass = no deterministic violation AND (verifier offline OR verifier approves). A deterministic
+    Substantive edits require both deterministic checks and an online independent verifier. A deterministic
     failure is final whatever Decisions says. Never raises because the verifier is down.
     """
     from . import decide
@@ -712,10 +712,20 @@ async def check(verbatim: str, rewrite: str, mode: str = "natural",
         except Exception as e:  # verifier trouble (incl. timeout) must never break the guard
             return decide.Verification(False, note=f"{type(e).__name__}")
 
-    det, ver = await asyncio.gather(asyncio.to_thread(check_rules, verbatim, rewrite, mode, protected), verifier())
+    from .rewrite import surface_equivalent
+    # Deterministic failures need no paid verifier; exact/surface-only edits need no semantic inference.
+    if surface_equivalent(verbatim, rewrite, protected):
+        return models.GuardResult(**{"pass": True, "verifier": "offline"})
+    det = await asyncio.to_thread(check_rules, verbatim, rewrite, mode, protected)
     violations = [models.Violation(**v.to_dict()) for v in det.violations]
+    if violations:
+        return models.GuardResult(**{"pass": False, "violations": violations, "verifier": "offline"})
+    ver = await verifier()
     online = bool(ver.available)
-    if online and not ver.ok:
+    if not online:
+        violations.append(models.Violation(rule="verification_required",
+            message="This edit changes wording and needs an independent verifier. Review it or use the original transcript."))
+    elif not ver.ok:
         for name in ver.failures():
             violations.append(models.Violation(rule="decisions_verifier", message=_VERIFY_TEXT.get(name, name)))
     return models.GuardResult(**{

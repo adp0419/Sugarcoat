@@ -73,7 +73,7 @@ def real_live(monkeypatch, tmp_path):
     monkeypatch.setattr(asr, "load", no_load)
     seen = {}
 
-    async def convert(src, wav, max_seconds=None):
+    async def convert(src, wav, max_seconds=None, start_seconds=0):
         seen["src"], seen["wav"], seen["cap"] = src, wav, max_seconds
         wav.write_bytes(b"RIFF")
 

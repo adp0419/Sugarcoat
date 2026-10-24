@@ -35,7 +35,7 @@ def guard(ok=True):
 
 
 def base_job(jid, terms):
-    return {"id": jid, "status": "running", "mode_used": "natural", "rung": "full", "verbatim": "", "sentences": [],
+    return {"id": jid, "revision": 0, "status": "running", "mode_used": "natural", "rung": "full", "verbatim": "", "sentences": [],
             "decisions": None, "rewrite": "", "edits": [], "guard": None, "trace": [], "timings": {"total_ms": 0},
             "protected_terms": terms, "notes": [], "error": None}
 
@@ -187,6 +187,7 @@ SPEAK_ERRORS = {  # shapes mirror backend/errors.py + backend/voice.py
 }
 
 
+@app.post("/api/speak/async")
 @app.post("/api/speak")
 async def speak(req: Request):
     body = await req.json()

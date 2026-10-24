@@ -245,7 +245,7 @@ def test_async_check_returns_contract_model_offline_default():
     res = asyncio.run(guard.check(CANON_IN, "Our meeting will take place on Friday at 5 PM."))
     assert res.pass_ is False and res.verifier == "offline"
     assert res.model_dump(by_alias=True)["pass"] is False
-    assert asyncio.run(guard.check(CANON_IN, CANON_OUT)).pass_ is True
+    assert asyncio.run(guard.check(CANON_IN, CANON_OUT)).pass_ is False
 
 
 # ---- combined verdict (deterministic + Decisions verifier) -----------------
@@ -261,7 +261,7 @@ def _with_verifier(monkeypatch, ver):
     return decide
 
 
-def test_combined_offline_is_deterministic_only(monkeypatch):
+def test_combined_offline_requires_verification(monkeypatch):
     import asyncio
 
     from backend import decide
@@ -269,7 +269,7 @@ def test_combined_offline_is_deterministic_only(monkeypatch):
     _with_verifier(monkeypatch, decide.Verification(False, note="no credits"))
 
     ok_res = asyncio.run(guard.check(CANON_IN, CANON_OUT))
-    assert ok_res.pass_ and ok_res.verifier == "offline" and ok_res.decisions_probs == {}
+    assert not ok_res.pass_ and ok_res.verifier == "offline" and ok_res.decisions_probs == {}
 
 
 def test_combined_online_approves(monkeypatch):
@@ -300,7 +300,7 @@ def test_combined_deterministic_failure_overrides_verifier_pass(monkeypatch):
 
     _with_verifier(monkeypatch, decide.Verification(True, {"meaning_preserved": 0.99}))
     res = asyncio.run(guard.check(CANON_IN, "Our meeting is on Friday at 5 PM. Everyone should attend."))
-    assert not res.pass_ and res.verifier == "online"
+    assert not res.pass_ and res.verifier == "offline"
     assert "superseded_value" in {v.rule for v in res.violations}
 
 
@@ -309,4 +309,4 @@ def test_combined_verifier_exception_degrades_to_offline(monkeypatch):
 
     _with_verifier(monkeypatch, RuntimeError("boom"))
     res = asyncio.run(guard.check(CANON_IN, CANON_OUT))
-    assert res.pass_ and res.verifier == "offline"
+    assert not res.pass_ and res.verifier == "offline"

@@ -112,6 +112,7 @@ class Timings(_Base):
 # ---- Job ----
 class Job(_Base):
     id: str
+    revision: int = 0
     status: JobStatus = "running"
     mode_requested: ModeChoice = "auto"
     mode_used: Optional[Mode] = None
@@ -126,7 +127,7 @@ class Job(_Base):
     trace: list[TraceEntry] = []
     timings: Timings = Timings()
     protected_terms: list[str] = []
-    fast: bool = False  # stage-mode fast path: no Decisions, no retry, Gemma <= 4 s, rules-only guard
+    fast: bool = False  # stage-mode fast path: no analysis/retry, Gemma <= 4 s; substantive edits still verified
     session: Optional[str] = None  # stage mode: echoes POST /api/process `session` / `segment`
     segment: Optional[int] = None
     notes: list[str] = []  # UI banners, e.g. "AI verifier offline", "no changes made"
@@ -152,11 +153,15 @@ class RewriteRequest(_Base):
     job_id: str
     mode: Optional[Mode] = None
     edited_text: Optional[str] = None
+    revision: int | None = None
 
 
 class SpeakRequest(_Base):
     job_id: str
     text: str
+    revision: int
+    approved: bool = False
+    override: bool = False
 
 
 class MeVoiceRequest(_Base):
@@ -220,6 +225,7 @@ class LiveResponse(_Base):
     text: str
     ms: int
     final: bool = False
+    start_seconds: float = 0.0
 
 
 # ---- Health ----

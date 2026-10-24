@@ -130,10 +130,6 @@ async def _guard(verbatim: str, rewrite_text: str, mode: str = "natural", protec
                  rules_only: bool = False) -> GuardResult:
     if settings.MOCK:
         return await mock.guard(verbatim, rewrite_text)
-    if rules_only:  # fast path: deterministic rules, no Decisions verifier call
-        g = await asyncio.to_thread(guard.check_rules, verbatim, rewrite_text, mode, protected or ())
-        return GuardResult(**{"pass": g.passed, "verifier": "offline",
-                              "violations": [Violation(**v.to_dict()) for v in g.violations]})
     return await guard.check(verbatim, rewrite_text, mode, protected or ())
 
 
@@ -148,8 +144,6 @@ def _guard_label(g: Any, fast: bool) -> str:
     """True model label for a finished guard stage (not the hoped-for one)."""
     if settings.MOCK:
         return "mock"
-    if fast:
-        return "rules only (fast mode)"
     return "rules + Decisions verifier" if isinstance(g, GuardResult) and g.verifier == "online" else RULES_ONLY
 
 
@@ -158,8 +152,16 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
     """full -> retry (stricter, lists violated facts) -> minimal (deterministic) -> original. Always terminates."""
     job = st.job
     fast = job.fast
-    job.mode_used = mode
     job.notes = [n for n in job.notes if not n.startswith(("ladder:", "AI editor unavailable")) and n != NOTE_SELF_CORRECTED]
+    if mode == "minimal" and not settings.MOCK:
+        job.mode_used = mode
+        job.rewrite = rw.surface_cleanup(job.verbatim, job.protected_terms) or job.verbatim
+        job.edits = rw.diff_edits(job.verbatim, job.rewrite)
+        job.rung = "minimal" if job.rewrite != job.verbatim else "original"
+        job.guard = GuardResult(**{"pass": True, "verifier": "offline"})
+        job.notes.append("ladder: Light mode removes hesitation sounds only")
+        return
+    job.mode_used = mode
     violations: list[str] | None = None
     guard_unavailable = False
     api_down = False  # rewrite call itself failed (auth/network): a stricter retry cannot help
@@ -176,6 +178,7 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
             violations = [f"previous attempt failed: {res}"] if rung == "full" else violations
             return False
         result, model_used = res
+        st.job.trace[-1].model = model_used
         job.rewrite, job.edits = result.rewrite, result.edits
         return await check(rung)
 
@@ -208,7 +211,8 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
 
     # fast path: don't spend ~0.3 s on a call that failed for account reasons in the last 10 min (then re-probe)
     down = None if settings.MOCK else status.recent("gemma", FAST_SKIP_GEMMA_S)
-    if fast and down in ("no_credits", "auth_error"):
+    if down in ("no_credits", "auth_error"):
+        api_down = True
         job.trace.append(TraceEntry(stage="rewrite", ok=False, ms=0, model=_models()["rewrite"],
                                     error=f"skipped: Gemma {down} (last real call)"))
         await emit(st, "stage", {"stage": "rewrite", "status": "error", "ms": 0, "preview": f"skipped: Gemma {down}"})
@@ -229,6 +233,14 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
             if any(e.reason == "self_correction" for e in res.edits):
                 job.notes.append(NOTE_SELF_CORRECTED)
             return
+
+    # Safe, useful degradation when a substantive edit cannot be independently verified.
+    surface = rw.surface_cleanup(job.verbatim, job.protected_terms)
+    if surface and surface != job.verbatim and rw.surface_equivalent(job.verbatim, surface, job.protected_terms):
+        job.rewrite, job.edits, job.rung = surface, rw.diff_edits(job.verbatim, surface), "minimal"
+        job.guard = GuardResult(**{"pass": True, "verifier": "offline"})
+        job.notes.append("ladder: hesitation sounds only; substantive edits could not be verified")
+        return
 
     await _fallback(st, "rewrite", "Using the original transcript - no changes made")
     job.rewrite, job.edits, job.rung = job.verbatim, [], "original"
@@ -283,11 +295,20 @@ async def fail(st: JobState, e: Exception, t0: float) -> None:
 
 
 async def pipeline(st: JobState, src: Path) -> None:
+    t0 = time.perf_counter()
+    try:
+        async with asyncio.timeout(settings.JOB_DEADLINE_S):
+            await _pipeline(st, src)
+    except TimeoutError:
+        await fail(st, api_error("asr_failed", "Processing exceeded its deadline.", "Try a shorter clip."), t0)
+
+
+async def _pipeline(st: JobState, src: Path) -> None:
     global _final_asr
     job, t0 = st.job, time.perf_counter()
     try:
         # 0 convert + 1 asr
-        wav = src.with_suffix(".wav")
+        wav = src.with_suffix(".converted.wav")
         try:
             if settings.MOCK:
                 ok, res = await stage(st, "convert", lambda: _async("mock: skipped ffmpeg"), model="mock")
@@ -305,36 +326,20 @@ async def pipeline(st: JobState, src: Path) -> None:
                     _final_asr -= 1
         finally:
             if not settings.KEEP_AUDIO:
-                for p in (src, src.with_suffix(".wav")):
+                for p in (src, wav):
                     p.unlink(missing_ok=True)
         if not ok:
             return await fail(st, res, t0)
         job.verbatim, job.words = res.text, res.words
         job.sentences = asr.split_sentences(job.verbatim, job.words)
 
-        # 3 decide (failure -> unavailable, never fatal). Fast path (stage mode) skips it.
-        if job.fast:
-            job.decisions = Decisions(available=False, recommended_mode="natural", note="Skipped (fast mode).")
-            job.trace.append(TraceEntry(stage="decide", ok=True, ms=0, model="skipped (fast mode)",
-                                        preview="skipped (fast mode)"))
-            await emit(st, "stage", {"stage": "decide", "status": "done", "ms": 0, "preview": "skipped (fast mode)"})
-            await run_ladder_watched(st, await resolve_mode(job, job.mode_requested), t0)
-            return await finish(st, t0)
-        ok, d = await stage(st, "decide", lambda: asyncio.wait_for(_decide(job.verbatim, job.sentences), 20),
-                            model=_models()["decide"],
-                            preview=lambda r: f"mode={r.recommended_mode} register={r.register}" if r.available else (r.note or "unavailable"))
-        job.decisions = d if ok else Decisions(available=False, recommended_mode="natural",
-                                               note=f"Decisions unavailable ({d}); using Natural mode.")
-        if not settings.MOCK and settings.DECISIONS_ENABLED and settings.OPENAI_API_KEY:
-            status.record("decisions", "ok" if job.decisions.available
-                          else status.from_decisions_note(job.decisions.note) or "error", job.decisions.note or "")
-        if not job.decisions.available:
-            job.notes.append("Decisions API unavailable - default Natural mode, deterministic guard only")
-            if not settings.MOCK:  # say so in the trace too: the call "succeeded" only in that it degraded cleanly
-                te = job.trace[-1]
-                te.ok, te.model = False, RULES_ONLY
-                te.error = job.decisions.note or "Decisions unavailable"
-                await _fallback(st, "decide", "Decisions offline - rule-based hints only")
+        # Style analysis is advisory, not a prerequisite for editing or independent verification.
+        job.decisions = Decisions(available=False, recommended_mode="natural",
+                                  note="Style analysis skipped; Auto uses Natural.")
+        job.trace.append(TraceEntry(stage="decide", ok=True, ms=0, model="skipped",
+                                    preview="Auto uses Natural; independent verification still applies"))
+        await emit(st, "stage", {"stage": "decide", "status": "done", "ms": 0,
+                                 "preview": "Style analysis skipped"})
         mode = await resolve_mode(job, job.mode_requested)
 
         await run_ladder_watched(st, mode, t0)
@@ -515,7 +520,7 @@ async def get_session(session_id: str):
 # ---------------------------------------------------------------- live draft transcript
 _live_lock = asyncio.Lock()
 _final_asr = 0  # final /api/process ASR passes in flight
-LIVE_MAX_S = 45
+LIVE_MAX_S = 8
 
 
 def _busy(why: str) -> ApiError:
@@ -523,10 +528,11 @@ def _busy(why: str) -> ApiError:
 
 
 @app.post("/api/live", response_model=LiveResponse)
-async def live(audio: UploadFile = File(...), seq: int = Form(...)):
+async def live(audio: UploadFile = File(...), seq: int = Form(...),
+               start_seconds: float = Form(0, ge=0, le=45)):
     """Rough draft transcript of the cumulative recording so far (not the verbatim of record).
     One pass at a time; final ASR has priority. The audio is never stored, whatever KEEP_AUDIO says."""
-    if _live_lock.locked() or _final_asr:
+    if _live_lock.locked() or _final_asr or asr.busy():
         raise _busy("A transcription is already running.")
     async with _live_lock:
         t = time.perf_counter()
@@ -540,7 +546,7 @@ async def live(audio: UploadFile = File(...), seq: int = Form(...)):
         src = await _save_upload(audio, f"live_{uuid.uuid4().hex}")
         wav = src.with_suffix(".live.wav")
         try:
-            await asr.convert(src, wav, max_seconds=LIVE_MAX_S)
+            await asr.convert(src, wav, max_seconds=LIVE_MAX_S, start_seconds=start_seconds)
             src.unlink(missing_ok=True)
             if _final_asr:  # a final pass arrived while we converted: let it have the model
                 raise _busy("Final transcription in progress.")
@@ -553,7 +559,7 @@ async def live(audio: UploadFile = File(...), seq: int = Form(...)):
         finally:
             src.unlink(missing_ok=True)
             wav.unlink(missing_ok=True)
-        return LiveResponse(seq=seq, text=text, ms=int((time.perf_counter() - t) * 1000))
+        return LiveResponse(seq=seq, text=text, ms=int((time.perf_counter() - t) * 1000), start_seconds=start_seconds)
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job, response_model_by_alias=True)
@@ -594,7 +600,27 @@ async def rewrite_endpoint(req: RewriteRequest):
         raise api_error("bad_request", "This job has no transcript to rewrite.", "Record again.")
     if req.edited_text is None and req.mode is None:
         raise api_error("bad_request", "Send mode or edited_text.", "")
+    if req.edited_text is not None and not req.edited_text.strip():
+        raise api_error("bad_request", "Edited text is empty.", "Type the text you want spoken.")
     async with st.lock:
+        if req.revision is not None and req.revision != st.job.revision:
+            raise api_error("bad_request", "This edit is based on a stale revision.", "Refresh the job.", 409)
+        if st.task and not st.task.done():
+            st.task.cancel()
+            try:
+                await st.task
+            except asyncio.CancelledError:
+                pass
+        # A detached snapshot prevents a superseded coroutine from overwriting the accepted revision.
+        job = st.job.model_copy(deep=True)
+        job.revision += 1
+        job.guard = None
+        job.status = "running"
+        st.job = job
+        st.run_start = len(st.events)
+        if req.edited_text is None:
+            st.task = asyncio.create_task(_rerun(st, req.mode))
+            return JSONResponse(_job_json(job), status_code=202)
         t0 = time.perf_counter()
         st.run_start = len(st.events)
         job.status = "running"
@@ -621,6 +647,23 @@ async def rewrite_endpoint(req: RewriteRequest):
     return job
 
 
+async def _rerun(st: JobState, mode: Mode) -> None:
+    t0 = time.perf_counter()
+    await run_ladder_watched(st, mode, t0)
+    await finish(st, t0)
+
+
+def _approve_speech(req: SpeakRequest) -> JobState:
+    _check_speak_text(req.text)
+    st = _state(req.job_id)
+    job = st.job
+    if not req.approved or job.status != "ready" or req.revision != job.revision or req.text.strip() != job.rewrite.strip():
+        raise api_error("bad_request", "Approve the current, ready text revision before speaking.", "Review the latest text.", 409)
+    if not (job.guard and job.guard.pass_) and not req.override:
+        raise api_error("bad_request", "This text has not passed verification.", "Review it and explicitly override if intended.", 409)
+    return st
+
+
 @app.post("/api/speak", response_model=SpeakResponse)
 async def speak(req: SpeakRequest, request: Request):
     client = await _speaker(request)  # None = global key (AUTH_ENABLED=0: unchanged behaviour)
@@ -629,7 +672,7 @@ async def speak(req: SpeakRequest, request: Request):
         raise api_error("bad_request", "Nothing to speak.", "Approve some text first.")
     if len(text) > MAX_SPEAK_CHARS:
         raise api_error("too_long", f"Text is {len(text)} characters (max {MAX_SPEAK_CHARS}).", "Shorten the announcement.")
-    st = JOBS.get(req.job_id)
+    st = _approve_speech(req)
     t = time.perf_counter()
     try:
         if settings.MOCK:
@@ -673,6 +716,7 @@ def _renderer(client=None) -> speakq.Renderer:
 async def speak_async(req: SpeakRequest, request: Request):
     """Stage mode: queue the approved text and return at once; poll GET /api/speak/{speak_id}."""
     text = _check_speak_text(req.text)
+    _approve_speech(req)
     task = speakq.QUEUE.submit(req.job_id, text, _renderer(await _speaker(request)))
     return SpeakAccepted(speak_id=task.id, queue_position=speakq.QUEUE.position(task), status=task.status)
 
@@ -718,7 +762,7 @@ async def _client_for(user_id: str):
     if p is None:
         raise api_error("voice_not_set_up", "No Twinly key saved for your account.", "Add your Twinly key in Settings.")
     key = auth.decrypt(p.twinly_key_encrypted, settings.ENCRYPTION_KEY, user_id)
-    k = hashlib.sha256(f"{user_id}\x00{key}".encode()).hexdigest()
+    k = hashlib.sha256(f"{key}".encode()).hexdigest()
     if k not in _user_clients:
         _user_clients[k] = _make_twinly_client(key)  # its voice_id (cache identity) is derived from the key
     return _user_clients[k]

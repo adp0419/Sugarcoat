@@ -61,6 +61,10 @@ class SpeakQueue:
     def submit(self, job_id: str, text: str, renderer: Renderer) -> SpeakTask:
         self.cleanup()
         texts = split.pack(text, CHUNK_CHARS)
+        identity = getattr(renderer, "identity", id(renderer))
+        for existing in self.tasks.values():
+            if existing.status != "failed" and existing.job_id == job_id and existing.texts == texts and getattr(existing.renderer, "identity", id(existing.renderer)) == identity:
+                return existing
         task = SpeakTask(id=uuid.uuid4().hex, job_id=job_id, texts=texts, renderer=renderer, created=self.clock())
         self.tasks[task.id] = task
         self._take_cached_prefix(task)
@@ -148,6 +152,7 @@ class TwinlyRenderer:
 
     def __init__(self, client):
         self.client = client
+        self.identity = (client.base, client.voice_id)
 
     async def render(self, text: str) -> AudioChunk:
         return await self.client.render(text)
@@ -161,6 +166,7 @@ class MockRenderer:
 
     def __init__(self, nap: Callable[[], Awaitable[None]], url: str, seconds: float):
         self.nap, self.url, self.seconds = nap, url, seconds
+        self.identity = "mock"
 
     async def render(self, text: str) -> AudioChunk:
         await self.nap()

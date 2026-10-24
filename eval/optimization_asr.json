@@ -1,0 +1,32 @@
+{
+  "kind": "local real inference; one synthetic clip; no human WER reference",
+  "load_warmup_ms": 15290.7,
+  "rows": [
+    {
+      "repeat": 0,
+      "mode": "verbatim",
+      "ms": 182365.38,
+      "texts": [
+        "So um the team meeting is on uh Friday at five PM no wait sorry Monday at five PM an- and everyone should bring their laptops."
+      ]
+    },
+    {
+      "repeat": 0,
+      "mode": "intended",
+      "ms": 354825.23,
+      "texts": [
+        "So the team meeting is on Friday at 5 p.m. No, wait, sorry, Monday at 5 p.m. and everyone should bring their laptops."
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "mode": "dual",
+      "error": "transcribe_dual() requires the ct2 backend."
+    }
+  ],
+  "median_ms": {
+    "verbatim": 182365.38,
+    "intended": 354825.23
+  }
+}

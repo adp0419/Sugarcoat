@@ -55,7 +55,7 @@ def run_once(c: httpx.Client, clip: Path, mode: str, fast: bool = False) -> tupl
 
 def speak_check(c: httpx.Client, job: dict) -> bool:
     t = time.perf_counter()
-    r = c.post("/api/speak", json={"job_id": job["id"], "text": job["rewrite"]}, timeout=90)
+    r = c.post("/api/speak", json={"job_id": job["id"], "text": job["rewrite"], "revision": job["revision"], "approved": True}, timeout=90)
     if r.status_code != 200:
         print(f"  speak -> {r.status_code} {r.text[:300]}")
         return False
@@ -74,7 +74,7 @@ def speak_check(c: httpx.Client, job: dict) -> bool:
 def speak_async_check(c: httpx.Client, job: dict, process_wall: float) -> bool:
     """Stage mode: queue the text, poll until the first chunk is playable. Prints time to first audio."""
     t = time.perf_counter()
-    r = c.post("/api/speak/async", json={"job_id": job["id"], "text": job["rewrite"]})
+    r = c.post("/api/speak/async", json={"job_id": job["id"], "text": job["rewrite"], "revision": job["revision"], "approved": True})
     if r.status_code != 202:
         print(f"  speak/async -> {r.status_code} {r.text[:300]}")
         return False

@@ -123,3 +123,14 @@ Keys only in env. `/api/*` bound to 127.0.0.1 unless `HOST=0.0.0.0` set delibera
 
 ## Versioning
 No versioning; single deploy. Changing a field = update models.py + types.ts + this file in the same commit.
+
+## Optimization contract update (2026-10-24, rohit-optimize)
+
+This section supersedes earlier speech and rerun descriptions above.
+
+- `Job.revision` is an integer, initially 0 and incremented for each accepted rewrite/takeover.
+- Both speech endpoints require `{job_id, text, revision, approved: true, override?: boolean}`. Unknown jobs return 404. Not-ready jobs, stale revisions, text mismatches, missing approval, and unverified text without an override return 409 (missing required fields return 400). Approval only covers that exact ready text.
+- `POST /api/rewrite` accepts optional `revision` for optimistic concurrency. A stale revision returns 409. Edited text returns the checked Job. Mode-only requests return **202 with the running Job**, then clients poll `/api/jobs/{id}` until ready/failed. A takeover cancels the previous background pipeline/rerun.
+- `/api/speak/async` returns 202 and a `speak_id`. Poll explicit `status`; `chunks: []` is normal while queued, and nonempty chunks can still be partial. A failed response may retain playable chunks. Duration is the sum of available chunk durations. Duplicate active submissions for the same job/text/voice share a speech task.
+- `/api/live` accepts bounded `start_seconds` (0–45) and returns it. Each draft contains at most eight seconds, not necessarily the entire transcript. The client sends a cumulative audio container every four seconds; final `/api/process` still performs full verbatim ASR.
+- Auto uses Natural without a blocking style-analysis call. Fast mode limits rewriting but never exempts substantive edits from independent verification. Light mode is local hesitation removal; unavailable verification leads to surface-only/original fallback.

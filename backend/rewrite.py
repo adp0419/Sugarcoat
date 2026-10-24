@@ -24,14 +24,16 @@ Preserve: every date, time, number, name, place; negations (not, never, n't); he
 commitments (will vs might); quantifiers (all, everyone, some, most).
 Self-corrections: keep only the final corrected value. Never keep both.
 Never add facts, greetings, sign-offs, or politeness that were not spoken.
-Convert to announcement voice only in PRESENTER mode.
+Preserve predicates, who did what to whom, condition operators (if/unless), and signed quantities with their currency and units.
+Do not turn requests into commitments, replace verbs with synonyms, or infer missing facts.
+PRESENTER mode may change punctuation and sentence boundaries only; preserve wording and order.
 Sentences marked LEAVE_UNCHANGED must be returned exactly.
 If unsure, change less.
 
 Modes:
 - MINIMAL: delete fillers (um, uh, you know) and duplicated words only. Wording otherwise unchanged.
 - NATURAL: also fix false starts, self-corrections and light grammar. Same register.
-- PRESENTER: also restructure into crisp announcement sentences. Still no new facts.
+- PRESENTER: same edits as NATURAL, plus punctuation and sentence boundaries. No paraphrasing.
 
 Return ONLY valid JSON, no prose, no code fences:
 {"rewrite": "<full edited text>", "edits": [{"from": "<exact span of the original>", "to": "<replacement or empty>", "reason": "<filler|repetition|self_correction|false_start|grammar|restructure>"}]}
@@ -47,7 +49,7 @@ VERBATIM: I I think we might meet around 5, uh, maybe.
 
 MODE: PRESENTER
 VERBATIM: We're, uh, not going to have the party on Thursday, everybody should know that.
-{"rewrite": "We are not having the party on Thursday. Everybody should know that.", "edits": [{"from": "We're, uh, not going to have", "to": "We are not having", "reason": "restructure"}, {"from": ", everybody", "to": ". Everybody", "reason": "restructure"}]}"""
+{"rewrite": "We're not going to have the party on Thursday. Everybody should know that.", "edits": [{"from": ", uh,", "to": "", "reason": "filler"}, {"from": ", everybody", "to": ". Everybody", "reason": "restructure"}]}"""
 
 _client = None
 
@@ -164,6 +166,11 @@ def sanity(verbatim: str, res: RewriteResult, mode: Mode) -> str | None:
         return "rewrite is longer than the original (hallucination signal)"
     if mode != "minimal" and res.rewrite.strip() == verbatim.strip() and _FILLER_RE.search(verbatim):
         return "rewrite is unchanged although fillers exist"
+    # Extractive edit budget: keep lexical order; additions/paraphrases need a user edit.
+    tokens = lambda text: re.findall(r"[\w]+(?:['’][\w]+)*|[$€£¥%+−-]", text.casefold())
+    source = iter(tokens(verbatim))
+    if not all(any(w == token for w in source) for token in tokens(res.rewrite)):
+        return "rewrite adds or reorders words; preserve the speaker's words and their order"
     return None
 
 
@@ -184,7 +191,7 @@ def diff_edits(a: str, b: str) -> list[Edit]:
         if tag == "equal":
             continue
         frm, to = " ".join(aw[i1:i2]), " ".join(bw[j1:j2])
-        reason = "filler" if _FILLER_RE.fullmatch(re.sub(r"\W", "", frm).lower() or "x") else ("restructure" if to else "filler")
+        reason = "filler" if _FILLER_RE.fullmatch(re.sub(r"\W", "", frm).lower() or "x") else "restructure"
         out.append(Edit(**{"from": frm, "to": to, "reason": reason}))
     return out
 
@@ -211,7 +218,7 @@ async def run(verbatim: str, mode: Mode, decisions: Decisions | None = None,
 
 
 # ---- deterministic rung 2 ----
-_FILLER_WORDS = r"(?:u+m+|u+h+|e+r+m?|a+h+|h+m+|mm+|you know|i mean)"
+_FILLER_WORDS = r"(?:u+m+|u+h+|e+r+m?|a+h+|h+m+|mm+)"
 _FILLER_RE = re.compile(rf"^{_FILLER_WORDS}$", re.I)
 _FILLER_SPAN = re.compile(rf"(?:,\s*)?(?<![\w'-])(?:{_FILLER_WORDS}|like(?=,))\b[,.]?\s*", re.I)
 _STUTTER = re.compile(r"\b(\w+)-\s*(?=\1\b)|\b(\w+)-\s+(?=\2\w)", re.I)  # "I- I want", "an- and" -> drop fragment
@@ -345,6 +352,7 @@ def minimal(verbatim: str, mode: Mode = "minimal") -> RewriteResult:
             return r
         text = rx.sub(f, text)
 
+    sub(re.compile(r"(?<![\w\'-])(?:you know|i mean),\s*", re.I), "filler")
     sub(_FILLER_SPAN, "filler", lambda m: " " if m.group(0).startswith(",") else "")
     sub(_STUTTER, "repetition", lambda m: "")
     sub(_PHRASE_REPEAT, "repetition", lambda m: m.group(1))
@@ -354,6 +362,22 @@ def minimal(verbatim: str, mode: Mode = "minimal") -> RewriteResult:
     text = re.sub(r"^[\s,]+|\s{2,}", lambda m: "" if m.start() == 0 else " ", text).strip()
     text = re.sub(r"(^|[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)
     return RewriteResult(rewrite=text, edits=edits)
+
+
+def surface_cleanup(text: str, protected=()) -> str:
+    """Narrow local fast path: remove hesitation sounds only, preserving all other tokens."""
+    spans = [m.span() for term in protected if term for m in re.finditer(re.escape(term), text, re.I)]
+    spans += [m.span() for m in re.finditer(r'"[^"]*"|“[^”]*”', text)]
+
+    def remove(match):
+        return match.group() if any(start <= match.start() < end for start, end in spans) else ""
+    out = re.sub(r"(?<![\w'-])(?:u+m+|u+h+|e+r+m?|h+m+)(?![\w'-])[, ]*", remove, text)
+    return re.sub(r"\s+", " ", out).strip(" ,")
+
+
+def surface_equivalent(original: str, candidate: str, protected=()) -> bool:
+    # Preserve punctuation too: moving a comma can change who is being addressed.
+    return original.strip() == candidate.strip() or surface_cleanup(original, protected) == candidate.strip()
 
 
 if __name__ == "__main__":

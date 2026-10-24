@@ -103,14 +103,15 @@ def test_503_job_unverified_never_reposts(tmp_path):
     assert e.value.code == "job_unverified" and f.post_calls == 1
 
 
-def test_other_503_retried_once(tmp_path):
+def test_other_503_not_retried(tmp_path):
     f = Fake(posts=[(503, {"error": {"code": "overloaded"}}), (200, DONE)])
-    run(make(tmp_path, f).speak("Hi."))
-    assert f.post_calls == 2
+    with pytest.raises(ApiError):
+        run(make(tmp_path, f).speak("Hi."))
+    assert f.post_calls == 1
     f2 = Fake(posts=[(503, {"error": {"code": "overloaded"}})])
     with pytest.raises(ApiError):
         run(make(tmp_path / "b", f2).speak("Hi."))
-    assert f2.post_calls == 2
+    assert f2.post_calls == 1
 
 
 def test_409_maps_to_twinly_offline(tmp_path):
@@ -144,7 +145,7 @@ def test_network_error_not_retried(tmp_path):
     c = voice.TwinlyClient("k", "https://t/v1", tmp_path, transport=httpx.MockTransport(boom))
     with pytest.raises(ApiError) as e:
         run(c.speak("Hi."))
-    assert e.value.code == "twinly_offline" and len(calls) == 1
+    assert e.value.code == "job_unverified" and len(calls) == 1
 
 
 def test_failed_job_raises(tmp_path):
@@ -239,22 +240,23 @@ def test_real_shape_http200_failed_job_voice_not_set_up(tmp_path):
     assert e.value.code == "voice_not_set_up" and f.post_calls == 1 and f.get_calls == 0
 
 
-def test_voice_starting_inside_200_failed_job_reposts_then_succeeds(tmp_path):
+def test_voice_starting_accepted_job_not_reposted(tmp_path):
     starting = {"id": "j", "object": "job", "status": "failed", "result": None,
                 "error": {"code": "voice_starting", "message": "Voice engine is starting."}}
     f = Fake(posts=[(200, starting), (200, starting), (200, DONE)])
     c = make(tmp_path, f)
-    res = run(c.speak("Hello, this is a test."))
-    assert f.post_calls == 3 and c.sleeps.count(5) == 2 and res.chunks[0].seconds == 2.5
+    with pytest.raises(ApiError):
+        run(c.speak("Hello, this is a test."))
+    assert f.post_calls == 1
 
 
-def test_voice_starting_forever_gives_up_after_four_posts(tmp_path):
+def test_voice_starting_job_gives_up_after_one_post(tmp_path):
     starting = {"id": "j", "status": "failed", "error": {"code": "voice_starting"}}
     f = Fake(posts=[(200, starting)])
     c = make(tmp_path, f)
     with pytest.raises(ApiError) as e:
         run(c.speak("Hi."))
-    assert f.post_calls == 4 and "reopen the Twinly app" in e.value.hint
+    assert f.post_calls == 1 and e.value.code == "job_unverified"
 
 
 def test_slow_voice_starting_does_not_repost_past_budget(tmp_path):
@@ -274,7 +276,7 @@ def test_slow_voice_starting_does_not_repost_past_budget(tmp_path):
                            clock=lambda: now[0])
     with pytest.raises(ApiError) as e:
         run(c.speak("Hello, this is a test."))
-    assert calls.count("POST") == 1 and "reopen the Twinly app" in e.value.hint
+    assert calls.count("POST") == 1 and e.value.code == "job_unverified"
 
 
 def test_other_key_never_plays_cached_audio_of_another_voice(tmp_path):
@@ -293,22 +295,23 @@ def test_voice_id_does_not_leak_key(tmp_path):
     assert "secret" not in c.voice_id and len(c.voice_id) < 20
 
 
-def test_voice_failed_reposted_once_then_succeeds(tmp_path):
+def test_voice_failed_job_not_reposted(tmp_path):
     """Real 2026-10-24: two concurrent jobs crashed Twinly's MLX engine; both came back failed, the next worked."""
     failed = {"id": "j", "object": "job", "status": "failed", "result": None,
               "error": {"code": "voice_failed", "message": "The voice engine couldn't render that."}}
     f = Fake(posts=[(200, failed), (200, DONE)])
     c = make(tmp_path, f)
-    res = run(c.speak("Hi."))
-    assert f.post_calls == 2 and voice.VOICE_FAILED_RETRY_S in c.sleeps and res.chunks[0].seconds == 2.5
+    with pytest.raises(ApiError):
+        run(c.speak("Hi."))
+    assert f.post_calls == 1
 
 
-def test_voice_failed_twice_gives_up(tmp_path):
+def test_voice_failed_once_gives_up(tmp_path):
     failed = {"id": "j", "status": "failed", "error": {"code": "voice_failed"}}
     f = Fake(posts=[(200, failed)])
     with pytest.raises(ApiError) as e:
         run(make(tmp_path, f).speak("Hi."))
-    assert f.post_calls == 2 and "render" in str(e.value)
+    assert f.post_calls == 1 and e.value.code == "job_unverified"
 
 
 def test_other_failed_codes_not_reposted(tmp_path):

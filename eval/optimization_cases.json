@@ -1,0 +1,92 @@
+[
+  {
+    "id": "review_0",
+    "original": "We will approve the proposal.",
+    "rewrite": "We will reject the proposal.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_1",
+    "original": "Send the file.",
+    "rewrite": "Delete the file.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_2",
+    "original": "We can meet if it rains.",
+    "rewrite": "We can meet unless it rains.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_3",
+    "original": "We will send the report.",
+    "rewrite": "We would send the report.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_4",
+    "original": "Alice will review Bob's proposal.",
+    "rewrite": "Bob will review Alice's proposal.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_5",
+    "original": "The temperature is -5 degrees.",
+    "rewrite": "The temperature is 5 degrees.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_6",
+    "original": "We will pay $50.",
+    "rewrite": "We will pay \u20ac50.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_7",
+    "original": "Do you know the answer?",
+    "rewrite": "Do the answer?",
+    "expect": "fail"
+  },
+  {
+    "id": "review_8",
+    "original": "I mean every word I said.",
+    "rewrite": "Every word I said.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_9",
+    "original": "The team may release it.",
+    "rewrite": "The team must release it.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_10",
+    "original": "Mina lends Owen the car.",
+    "rewrite": "Owen lends Mina the car.",
+    "expect": "fail"
+  },
+  {
+    "id": "review_11",
+    "original": "Keep the backup unless storage fails.",
+    "rewrite": "Keep the backup if storage fails.",
+    "expect": "fail"
+  },
+  {
+    "id": "surface",
+    "original": "We um will send it.",
+    "rewrite": "We will send it.",
+    "expect": "pass"
+  },
+  {
+    "id": "lexical_know",
+    "original": "Do you know the answer?",
+    "rewrite": "Do you know the answer?",
+    "expect": "pass"
+  },
+  {
+    "id": "lexical_mean",
+    "original": "I mean every word I said.",
+    "rewrite": "I mean every word I said.",
+    "expect": "pass"
+  }
+]

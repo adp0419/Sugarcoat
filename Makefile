@@ -19,6 +19,7 @@ mock:  ## everything stubbed from fixtures/
 
 test:  ## no network
 	MOCK=1 $(PY) -m pytest -q
+	node --test tests/frontend_regression.cjs
 
 smoke:  ## against a running server: N=5 runs of frontend/demo-clip.m4a (BASE=..., SPEAK=1 adds one real speak ~$$0.10, FAST=1 CLIP=fixtures/sentence_short.m4a = stage mode)
 	$(PY) scripts/smoke.py

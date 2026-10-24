@@ -157,16 +157,16 @@ def test_me_voice_never_returns_the_key(authed, monkeypatch):
         assert c.put("/api/me/voice", json={"twinly_key": "x"}, headers=_h()).status_code == 400
 
 
-def test_speak_uses_the_signed_in_users_key(authed, monkeypatch):
+def test_speak_uses_the_signed_in_users_key(authed, monkeypatch, approved_speech):
     monkeypatch.setattr(settings, "MOCK", False)
     with TestClient(main.app) as c:
         c.put("/api/me/voice", json={"twinly_key": KEY_A}, headers=_h("user-a"))
         c.put("/api/me/voice", json={"twinly_key": KEY_B}, headers=_h("user-b"))
-        assert c.post("/api/speak", json={"job_id": "j", "text": "Hi from A"}, headers=_h("user-a")).status_code == 200
-        assert c.post("/api/speak", json={"job_id": "j", "text": "Hi from B"}, headers=_h("user-b")).status_code == 200
+        assert c.post("/api/speak", json=approved_speech("Hi from A"), headers=_h("user-a")).status_code == 200
+        assert c.post("/api/speak", json=approved_speech("Hi from B"), headers=_h("user-b")).status_code == 200
         assert authed[KEY_A].spoken == ["Hi from A"] and authed[KEY_B].spoken == ["Hi from B"]
-        assert c.post("/api/speak", json={"job_id": "j", "text": "x"}).status_code == 401
-        r = c.post("/api/speak", json={"job_id": "j", "text": "x"}, headers=_h("user-c"))  # no key saved
+        assert c.post("/api/speak", json={"job_id": "j", "text": "x", "revision": 0}).status_code == 401
+        r = c.post("/api/speak", json={"job_id": "j", "text": "x", "revision": 0}, headers=_h("user-c"))  # no key saved
         assert r.status_code == 409 and r.json()["error"]["code"] == "voice_not_set_up"
 
 
@@ -182,11 +182,11 @@ def test_voice_cache_key_includes_voice_identity(tmp_path):
     assert a2._cached(a2.chunk_hash("Hello there.")) is not None
 
 
-def test_auth_off_changes_nothing(monkeypatch):
+def test_auth_off_changes_nothing(monkeypatch, approved_speech):
     monkeypatch.setattr(settings, "AUTH_ENABLED", False)
     with TestClient(main.app) as c:
         assert c.get("/api/me/voice").json()["error"]["code"] == "not_found"
         assert c.put("/api/me/voice", json={"twinly_key": KEY_A}).status_code == 404
-        r = c.post("/api/speak", json={"job_id": "j", "text": "Hello"})  # no token needed
+        r = c.post("/api/speak", json=approved_speech("Hello"))  # no token needed
         assert r.status_code == 200 and r.json()["chunks"][0]["seconds"] == 3.84
-        assert c.post("/api/speak/async", json={"job_id": "j", "text": "Hello"}).status_code == 202
+        assert c.post("/api/speak/async", json=approved_speech("Hello")).status_code == 202

@@ -9,6 +9,8 @@ export type StageStatus = "start" | "done" | "error" | "fallback";
 export interface StageEvent { stage: StageName; status: StageStatus; ms?: number; preview?: string }
 
 export interface Decisions {
+  available: boolean;
+  note?: string | null;
   predicates: Record<string, number>;
   register: string;
   recommended_mode: Mode;
@@ -37,15 +39,16 @@ export interface TraceEntry {
 
 export interface Job {
   id: string;
+  revision: number;
   status: "running" | "ready" | "failed";
   mode_used: Mode;
   rung: Rung;
   verbatim: string;
   sentences: string[];
-  decisions: Decisions;
+  decisions: Decisions | null;
   rewrite: string;
   edits: Edit[];
-  guard: Guard;
+  guard: Guard | null;
   trace: TraceEntry[];
   timings: { total_ms: number };
   notes?: string[]; // e.g. "Self-corrections fixed by rules (AI editor unavailable)"
@@ -76,7 +79,7 @@ export interface SpeakStatus {
 }
 
 // POST /api/live (multipart: audio = cumulative recording so far, seq). 429 {error:{code:"busy"}} = skip this tick.
-export interface LiveResult { seq: number; text: string; ms: number; final: false }
+export interface LiveResult { seq: number; text: string; ms: number; final: false; start_seconds: number }
 
 export interface SpeakChunk { url: string; seconds: number; cached: boolean }
 export interface SpeakResult { chunks: SpeakChunk[]; total_seconds: number; ms: number }
@@ -90,3 +93,6 @@ export interface Health {
   twinly: { online: boolean; voice_ready: boolean };
   mock: boolean;
 }
+
+export interface SpeakRequest { job_id: string; text: string; revision: number; approved: boolean; override?: boolean }
+export interface RewriteRequest { job_id: string; mode?: Exclude<Mode, "auto">; edited_text?: string; revision?: number }

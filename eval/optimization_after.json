@@ -1,0 +1,858 @@
+{
+  "repo": "/Users/rohit/Projects/VoiceFlow",
+  "kind": "controlled local delays + labelled offline safety cases",
+  "provider_delays_ms": {
+    "asr": 40,
+    "analysis": 80,
+    "rewrite": 60,
+    "independent_guard": 40,
+    "per_audio_chunk": 100
+  },
+  "pipeline_ms": [
+    144.327,
+    144.883,
+    147.457,
+    145.627,
+    143.758,
+    143.101,
+    146.001,
+    148.035,
+    145.473,
+    148.605
+  ],
+  "pipeline_median_ms": 145.55,
+  "audio_first_ready_ms": [
+    101.185,
+    100.85,
+    100.58,
+    100.317,
+    101.079,
+    100.26,
+    100.886,
+    101.114,
+    100.227,
+    105.229
+  ],
+  "audio_all_ready_ms": [
+    301.283,
+    300.889,
+    300.858,
+    301.072,
+    300.504,
+    301.353,
+    301.643,
+    301.541,
+    301.175,
+    308.495
+  ],
+  "first_ready_median_ms": 100.868,
+  "all_ready_median_ms": 301.22900000000004,
+  "live_work_model": {
+    "clip_seconds": 45,
+    "before_ticks": [
+      3,
+      6,
+      9,
+      12,
+      15,
+      18,
+      21,
+      24,
+      27,
+      30,
+      33,
+      36,
+      39,
+      42
+    ],
+    "after_ticks": [
+      4,
+      8,
+      12,
+      16,
+      20,
+      24,
+      28,
+      32,
+      36,
+      40,
+      44
+    ],
+    "before_asr_seconds": 315,
+    "after_asr_seconds": 84,
+    "note": "upper-bound submitted audio seconds, assuming each request completes before next tick; not measured compute speed"
+  },
+  "offline_safety": {
+    "good": 47,
+    "bad": 48,
+    "good_autoapproved": 10,
+    "bad_autoapproved": 0,
+    "rows": [
+      {
+        "id": "canon_natural",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "canon_presenter",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "canon_minimalish",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "hedges_natural",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "hedges_presenter",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "neg_natural",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "numbers_natural",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "fluent_unchanged",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "selfcorr_words",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "selfcorr_digits",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "stutter_natural",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "names_natural",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "names_presenter",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "cs_natural",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "cs_presenter",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "asr_name_protected",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "time_spoken",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "cannot_repeat",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "budget_about",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "room_not",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "professor",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "launch_presenter",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "probably_expand",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "start_name_kept",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "report_tomorrow",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "attendance_start",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "please_start",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "zoom_link",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "gym_9",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "canon_friday",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "superseded_value",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "canon_both_days",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "superseded_value"
+        ]
+      },
+      {
+        "id": "canon_6pm",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "canon_some",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "quantifier",
+          "quantifier"
+        ]
+      },
+      {
+        "id": "hedges_removed",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "hedge_dropped",
+          "hedge_dropped",
+          "hedge_dropped"
+        ]
+      },
+      {
+        "id": "hedges_partial",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "hedge_dropped",
+          "hedge_dropped"
+        ]
+      },
+      {
+        "id": "neg_swapped_days",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "negation"
+        ]
+      },
+      {
+        "id": "neg_nobody_everyone",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "negation",
+          "quantifier",
+          "quantifier"
+        ]
+      },
+      {
+        "id": "numbers_swap",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "numbers_dropped",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "dropped_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "numbers_time",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "selfcorr_old_count",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "superseded_value",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "selfcorr_old_time",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "superseded_value",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "stutter_date",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "names_swapped",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "names_quant",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "negation",
+          "quantifier"
+        ]
+      },
+      {
+        "id": "cs_swapped",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "reordered"
+        ]
+      },
+      {
+        "id": "cs_added",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact"
+        ]
+      },
+      {
+        "id": "cs_dropped",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "asr_name_unprotected",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "launch_modal",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "modal",
+          "modal"
+        ]
+      },
+      {
+        "id": "probably_dropped",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "hedge_dropped"
+        ]
+      },
+      {
+        "id": "cannot_flip",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "negation"
+        ]
+      },
+      {
+        "id": "budget_exact",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "hedge_dropped"
+        ]
+      },
+      {
+        "id": "room_dropped",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "dropped_fact",
+          "negation"
+        ]
+      },
+      {
+        "id": "professor_swap",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "time_am",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "report_friday",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "start_name_swap",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "gym_every",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "quantifier"
+        ]
+      },
+      {
+        "id": "cs_dropped_protected",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "protected_term",
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "cs_protected_ok",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_venue_correction",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_presenter_condense",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_front_time",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_list_kept",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_list_swap_order",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_grammar",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_false_start_content",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_and_rephrase",
+        "expected": "pass",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_list_added",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "invented_fact"
+        ]
+      },
+      {
+        "id": "ho_role_swap",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "ho_drop_location",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "ho_swap_object",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "reordered"
+        ]
+      },
+      {
+        "id": "ho_drop_condition",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "dropped_fact"
+        ]
+      },
+      {
+        "id": "utt_hedges",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "utt_negations",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "utt_numbers_heavy",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "utt_already_fluent",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "utt_stutter_false_start",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "utt_names_quantifiers",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "review_0",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_1",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_2",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_3",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_4",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_5",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_6",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_7",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_8",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_9",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "hedge_dropped",
+          "modal"
+        ]
+      },
+      {
+        "id": "review_10",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "review_11",
+        "expected": "fail",
+        "approved": false,
+        "rules": [
+          "verification_required"
+        ]
+      },
+      {
+        "id": "surface",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "lexical_know",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      },
+      {
+        "id": "lexical_mean",
+        "expected": "pass",
+        "approved": true,
+        "rules": []
+      }
+    ]
+  }
+}
