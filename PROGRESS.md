@@ -8,13 +8,13 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 
 | Terminal | Owner files | % done | Current task |
 |----------|-------------|--------|--------------|
-| T1 core | backend/models.py, config.py, main.py, asr.py, rewrite.py, __init__.py, fixtures/, requirements.txt, Makefile, .env.example, PROGRESS.md | 5% | Phase 0 skeleton |
+| T1 core | backend/models.py, config.py, main.py, asr.py, rewrite.py, __init__.py, fixtures/, requirements.txt, Makefile, .env.example, PROGRESS.md | 10% | Phase 1: fixtures + MOCK paths |
 | T2 guard/decide/voice | backend/guard.py, decide.py, voice.py, tests/ | 0% | waiting on T1 contract |
 | T3 frontend | frontend/ | 0% | waiting on T1 contract |
 
 ## T1 core backend + contract
-- [ ] 0  PROGRESS.md
-- [ ] 0  models.py, config.py, main.py skeleton + stubs (guard/decide/voice signatures)
+- [x] 0  PROGRESS.md (2026-10-23)
+- [x] 0  models.py, config.py, main.py skeleton + stubs (guard/decide/voice signatures) (2026-10-23)
 - [ ] 1  fixtures/ + MOCK code paths
 - [ ] 1  ffmpeg convert + asr.py (CrisperWhisper)
 - [ ] 2  rewrite.py (Gemma 4 via Gemini API, 3 modes, minimal-filler rung)
