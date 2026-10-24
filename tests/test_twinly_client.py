@@ -255,3 +255,23 @@ def test_voice_starting_forever_gives_up_after_four_posts(tmp_path):
     with pytest.raises(ApiError) as e:
         run(c.speak("Hi."))
     assert f.post_calls == 4 and "reopen the Twinly app" in e.value.hint
+
+
+def test_slow_voice_starting_does_not_repost_past_budget(tmp_path):
+    """Real shape: 202 running, then the job fails with voice_starting ~43 s later. A second
+    attempt would blow main.py's 60 s cap, so give up after one POST with a clear hint."""
+    real = json.loads((voice.settings.fixtures_dir / "real_twinly_voice_starting.json").read_text())["exchanges"]
+    post, get = real[0], real[1]
+    now = [0.0]
+
+    def handler(req):
+        now[0] += 43.0 if req.method == "GET" else 0.5
+        item = post if req.method == "POST" else get
+        return httpx.Response(item["status"], json=item["body"])
+
+    calls = []
+    c = voice.TwinlyClient("k", "https://t/v1", tmp_path, transport=httpx.MockTransport(lambda r: (calls.append(r.method), handler(r))[1]),
+                           clock=lambda: now[0])
+    with pytest.raises(ApiError) as e:
+        run(c.speak("Hello, this is a test."))
+    assert calls.count("POST") == 1 and "reopen the Twinly app" in e.value.hint

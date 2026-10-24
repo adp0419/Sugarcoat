@@ -1,0 +1,77 @@
+{
+  "captured": "2026-10-24",
+  "text": "Hello, this is a test.",
+  "wall_s": 100.09,
+  "exchanges": [
+    {
+      "method": "POST",
+      "path": "/voice/speak",
+      "status": 202,
+      "latency_s": 26.5,
+      "body": {
+        "id": "a553b5db-fd5c-4b50-b80b-f55fcbb641a9",
+        "object": "job",
+        "kind": "voice.speak",
+        "status": "running",
+        "created_at": "2026-10-24T04:40:47.250Z",
+        "updated_at": "2026-10-24T04:40:48.091Z",
+        "result": null,
+        "error": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/jobs/a553b5db-fd5c-4b50-b80b-f55fcbb641a9",
+      "status": 200,
+      "latency_s": 18.31,
+      "body": {
+        "id": "a553b5db-fd5c-4b50-b80b-f55fcbb641a9",
+        "object": "job",
+        "kind": "voice.speak",
+        "status": "failed",
+        "created_at": "2026-10-24T04:40:47.250Z",
+        "updated_at": "2026-10-24T04:41:30.707Z",
+        "result": null,
+        "error": {
+          "code": "voice_starting",
+          "message": "Twinly's voice engine is still starting on this Mac. Try again in a minute."
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/voice/speak",
+      "status": 202,
+      "latency_s": 28.0,
+      "body": {
+        "id": "cc6249b4-dded-4eb3-8592-f5ae9f9e1c72",
+        "object": "job",
+        "kind": "voice.speak",
+        "status": "running",
+        "created_at": "2026-10-24T04:41:37.213Z",
+        "updated_at": "2026-10-24T04:41:37.527Z",
+        "result": null,
+        "error": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/jobs/cc6249b4-dded-4eb3-8592-f5ae9f9e1c72",
+      "status": 200,
+      "latency_s": 17.27,
+      "body": {
+        "id": "cc6249b4-dded-4eb3-8592-f5ae9f9e1c72",
+        "object": "job",
+        "kind": "voice.speak",
+        "status": "failed",
+        "created_at": "2026-10-24T04:41:37.213Z",
+        "updated_at": "2026-10-24T04:42:20.572Z",
+        "result": null,
+        "error": {
+          "code": "voice_starting",
+          "message": "Twinly's voice engine is still starting on this Mac. Try again in a minute."
+        }
+      }
+    }
+  ]
+}

@@ -34,6 +34,7 @@ MAX_TOTAL_CHARS = 2400
 MAX_CONCURRENT = 2
 RATE_PER_MIN = 30
 JOB_TIMEOUT_S = 60.0
+RENDER_BUDGET_S = 55.0     # main.py cancels voice.speak at 60 s; never start an attempt that can't finish
 LINE_COST_USD = 0.10
 SPEND_CAP_LINES = 150
 HEALTH_TTL_S = 30.0
@@ -270,13 +271,18 @@ class TwinlyClient:
             self.in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self.in_flight)
             try:
+                started = self.clock()
                 for attempt in range(4):  # docs/md/04: voice_starting -> wait 5 s, retry up to 3x
+                    t_try = self.clock()
                     first = await self._post_speak(text)
                     try:
                         data = await self._await_job(first)
                         break
                     except _VoiceStarting:
-                        if attempt == 3:
+                        # A real voice_starting job fails after ~43 s (fixtures/real_twinly_voice_starting.json):
+                        # only re-post if another attempt that long still fits in the budget.
+                        took = self.clock() - t_try
+                        if attempt == 3 or (self.clock() - started) + 5 + took > RENDER_BUDGET_S:
                             raise api_error("internal", "Twinly voice is still starting.",
                                             "Quit and reopen the Twinly app so its voice engine starts, then retry.")
                         await self.sleep(5)
