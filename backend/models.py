@@ -20,8 +20,10 @@ EditReason = Literal["filler", "repetition", "self_correction", "false_start", "
 StageName = Literal["convert", "asr", "decide", "rewrite", "guard", "speak"]
 ERROR_CODES = (
     "no_speech", "asr_failed", "twinly_offline", "voice_not_set_up", "rate_limited",
-    "job_unverified", "too_long", "internal", "not_found", "bad_request",
+    "job_unverified", "too_long", "internal", "not_found", "bad_request", "busy", "unsupported_media",
 )
+# /api/health provider states. no_credits / auth_error come from the most recent real call (never a paid probe).
+ProviderStatus = Literal["ok", "off", "error", "no_credits", "auth_error"]
 
 
 class _Base(BaseModel):
@@ -158,6 +160,14 @@ class ProcessAccepted(_Base):
     job_id: str
 
 
+class LiveResponse(_Base):
+    """POST /api/live: rough draft of the recording so far. Not the verbatim of record."""
+    seq: int
+    text: str
+    ms: int
+    final: bool = False
+
+
 # ---- Health ----
 class TwinlyHealth(_Base):
     online: bool = False
@@ -166,8 +176,8 @@ class TwinlyHealth(_Base):
 
 class HealthResponse(_Base):
     asr_loaded: bool
-    decisions: Literal["ok", "off", "error"]
-    gemma: Literal["ok", "error"]
+    decisions: ProviderStatus
+    gemma: Literal["ok", "error", "no_credits", "auth_error"]
     twinly: TwinlyHealth
     mock: bool
 

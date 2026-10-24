@@ -23,6 +23,14 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] 4  integrate T2 guard/decide/voice - real run: ASR 2.1 s -> decide -> rewrite -> guard in 2.9 s total; guard correctly blocked Friday; ladder ended at `original` because Gemma 401 + Decisions 429 (2026-10-23)
 - [x] 5  Makefile, pinned requirements.txt, .env.example (2026-10-23)
 
+### T1 Round 3
+- [ ] R3.1 POST /api/live (live draft transcript; real + MOCK; latency measured; interval documented)
+- [x] R3.2 deterministic self-correction in the fallback rung (natural/presenter): 38 tests (13 inline, 6 restart markers, 10 false positives, canonical + user backtrack pass guard.check_rules), note `Self-corrections fixed by rules (AI editor unavailable)` (2026-10-24 10:28)
+- [x] R3.3 Gemini 401/402/403 + Decisions credit errors: no retry (402 job now ends in <2 s), health `no_credits`/`auth_error` from last real call (persisted in cache/provider_status.json; free models.get passes on a no-credit key, verified) (2026-10-24 10:28)
+- [ ] R3.4 `make smoke` (N runs against a live server, optional SPEAK=1)
+- [ ] R3.5 real end-to-end: `make run` + `make smoke` 5x + SPEAK=1 once, numbers recorded
+- [ ] R3.6 startup/polish: cold start < 60 s, clean logs, unsupported mime rejected
+
 ## T2 guard / decide / voice
 - [x] 1  guard.py deterministic checks + unit tests (42 cases; `check_rules` sync, `check` async contract wrapper) (2026-10-23 23:46)
 - [x] 2  decide.py (analyze + verify, 15 tests) (2026-10-23 23:52). G2 PARTIAL: request schema + 400-question limit verified live, but key has no credits (429), so success response shape unverified; offline path verified live
@@ -59,3 +67,12 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] R2-6 docs/RUNBOOK.md one-page demo-day checklist (2026-10-24 01:00)
 - [ ] R2-7 README: eval (needs eval/RESULTS.md from T2), frontier difficulties, screenshots
 - [ ] R2-8 DIFFICULTIES.md T3 section
+
+### T3 Round 3 (frontend redesign)
+- [ ] R3-1 design system: light/white + one blue accent, tokens in :root (color, 8 px spacing, radius, shadow, type), SVG icon sprite, no dark mode
+- [ ] R3-2 3-step layout (1 Speak / 2 Review / 3 Hear it) always visible; status popover in header (incl. no_credits / auth_error)
+- [ ] R3-3 Speak: big record button + 45 s ring, live level meter (AnalyserNode, reduced-motion aware), live transcript via POST /api/live (hidden on 404), demo clip, names field, first-run hint
+- [ ] R3-4 processing line (hear -> analyse -> edit -> check) + restyled watchdog; Review: inline diff with reasons, compare toggle, editable text, one meaning-check line, "How this was made" panel
+- [ ] R3-5 Hear it: speak button with disabled reason, custom player (progress, replay, download, synthetic label), inline speak errors with fix steps
+- [ ] R3-6 e2e rewritten: happy path with fake mic + live transcript, all R2 failure paths, keyboard-only, 16 px / 4.5:1 / 3:1 audit, 1280x720 + 200% zoom
+- [ ] R3-7 screenshots + demo.gif regenerated from MOCK; one real-server screenshot; list for T2

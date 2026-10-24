@@ -7,6 +7,7 @@ from .config import settings
 from .models import ASRResult, AudioChunk, Decisions, GuardResult, RewriteResult, SpeakResponse, Violation
 
 BACKUP_NAME = "backup_demo.m4a"
+LIVE_WORDS_PER_SEQ = 6  # /api/live: each tick reveals ~6 more words (~2 words/s at a 3 s interval)
 
 
 def _load(name: str):
@@ -15,6 +16,10 @@ def _load(name: str):
 
 async def _nap():
     await asyncio.sleep(random.uniform(0.3, 0.8))
+
+
+def asr_text() -> str:
+    return _load("asr_canonical.json")["text"]
 
 
 async def asr() -> ASRResult:

@@ -9,6 +9,7 @@ import json
 import logging
 import re
 
+from . import status
 from .config import settings
 from .errors import api_error
 from .models import Decisions, Edit, Mode, RewriteResult
@@ -98,6 +99,24 @@ _RATE_LIMITED = ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE")
 _SERVER_ERROR = ("500", "INTERNAL")
 
 
+class GemmaUnavailable(Exception):
+    """Account problem (no credits / bad key): retrying or switching model cannot help. `status` feeds /api/health."""
+
+    def __init__(self, status: str, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def classify(e: Exception) -> GemmaUnavailable | None:
+    """402 RESOURCE_EXHAUSTED "prepayment credits are depleted" (measured 2026-10-24), 401, 403 -> no retry."""
+    code, msg = getattr(e, "code", None), str(e)
+    if code == 402 or msg.startswith("402") or "credits are depleted" in msg:
+        return GemmaUnavailable("no_credits", "Gemini key has no credits (402) - add billing in AI Studio")
+    if code in (401, 403) or msg.startswith(("401", "403")) or "UNAUTHENTICATED" in msg or "PERMISSION_DENIED" in msg:
+        return GemmaUnavailable("auth_error", f"Gemini key rejected ({code or msg[:3]}) - check GEMINI_API_KEY")
+    return None
+
+
 async def _call(prompt: str, deadline: float) -> tuple[str, str]:
     """At most two attempts, all inside one time budget (`deadline`, loop clock). Returns (raw, model_used).
 
@@ -112,8 +131,13 @@ async def _call(prompt: str, deadline: float) -> tuple[str, str]:
         if left < 1:
             break
         try:
-            return await asyncio.wait_for(_generate(prompt, model), min(settings.GEMMA_TIMEOUT_S, left)), model
+            raw = await asyncio.wait_for(_generate(prompt, model), min(settings.GEMMA_TIMEOUT_S, left))
+            status.record("gemma", "ok")
+            return raw, model
         except Exception as e:
+            if acct := classify(e):
+                status.record("gemma", acct.status, str(acct))
+                raise acct from None
             last = e
             msg = str(e)
             timeout = isinstance(e, asyncio.TimeoutError)
@@ -192,10 +216,116 @@ _STUTTER = re.compile(r"\b(\w+)-\s*(?=\1\b)", re.I)  # "I- I want" -> "I want"
 _REPEAT = re.compile(r"\b(\w+)(\s*,?\s+\1\b)+", re.I)  # "the the" -> "the"
 
 
-def minimal(verbatim: str) -> RewriteResult:
-    """Regex-remove fillers, collapse immediate repeats, fix spacing/capitalisation. No LLM."""
+# Self-corrections without an LLM (natural/presenter only). Used when Gemma is down, which on the Gemini
+# API is most of the time (402 no credits / 500 / >12 s). Two shapes, both conservative:
+#  a) inline, same-type values: "on Friday—actually, sorry, Monday" -> "on Monday"
+#  b) a sentence that restarts the previous one: "I'm a CS major. Wait, I'm actually a CS major, but ..." -> 2nd only
+_NUMW = (r"(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|"
+         r"eight|nine))?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+         r"sixteen|seventeen|eighteen|nineteen|hundred)")
+_DAYW = r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|tonight)"
+_MONTHW = r"(?:january|february|march|april|may|june|july|august|september|october|november|december)"
+_ORDW = (r"(?:\d{1,2}(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|"
+         r"twelfth|fifteenth|twentieth|thirtieth)")
+_MER = r"(?:[ap]\.?\s?m\.?(?![a-z])|o'clock)"
+_VALUE = (rf"(?:{_MONTHW}\s+(?:the\s+)?(?:{_ORDW}|\d{{1,2}})(?!\w)"           # date: March 3rd
+          rf"|the\s+{_ORDW}(?:\s+of\s+{_MONTHW})?(?!\w)"                       # date: the 5th (of May)
+          rf"|(?:\d{{1,2}}(?::\d{{2}})?|{_NUMW})\s*{_MER}|\d{{1,2}}:\d{{2}}(?!\w)|noon(?!\w)|midnight(?!\w)"  # time
+          rf"|{_DAYW}(?!\w)"
+          rf"|(?!may\b|march\b){_MONTHW}(?!\w)"                                # bare month (not the verbs)
+          rf"|\$?\d+(?:[.,]\d+)*%?(?!\w)|{_NUMW}(?![\w-]))")
+_SC_FILL = r"(?:um+|uh+|er+|ah+)"
+# bare "no"/"wait" only count when punctuated ("5, no, 6"), so "at 5 no one came" is left alone
+_SC_MARK = (r"(?:no,?\s+wait|wait,?\s+no|actually|sorry|i\s+mean|or\s+rather|rather|make\s+that|scratch\s+that|oops"
+            r"|(?:no|wait)(?=\s*[,—–-]))")
+_SC_P = r"[\s,—–-]*"
+_INLINE = re.compile(
+    rf"(?<![\w'$])(?P<x>{_VALUE})(?P<sep>{_SC_P}(?:{_SC_FILL}{_SC_P})*{_SC_MARK}(?:{_SC_P}(?:{_SC_FILL}|{_SC_MARK}))*{_SC_P})"
+    rf"(?:(?P<prep>on|at|by|in|to)\s+)?(?P<y>{_VALUE})", re.I)
+_PREP_BEFORE = re.compile(r"\b(on|at|by|in|to)\s+$", re.I)
+
+
+def _value_kind(v: str) -> str:
+    v = v.lower().strip()
+    if re.fullmatch(_DAYW, v):
+        return "day"
+    if re.search(_MER, v) or ":" in v or v in ("noon", "midnight"):
+        return "time"
+    if re.match(_MONTHW, v) or v.startswith("the "):
+        return "date"
+    return "num"
+
+
+def _same_kind(a: str, b: str) -> bool:
+    # strictly the same kind: "at 5, I mean 6 PM" stays as spoken (the guard cannot pair a number with a time)
+    return _value_kind(a) == _value_kind(b)
+
+
+_RESTART = re.compile(
+    r"^(?:(?:um+|uh+|so|oh|okay)[,\s]+)*"
+    r"(?:(?:no,?\s+wait|wait,?\s+no|i\s+mean|let\s+me\s+rephrase(?:\s+that)?|let\s+me\s+start\s+over|scratch\s+that"
+    r"|or\s+rather|correction)[,:.—-]?|(?:wait|actually|sorry)[,:—-])\s*", re.I)
+_STOP = set("""a an the and or but so of to in on at by for with from as is am are was were be been being it its
+this that these those i i'm i've i'd i'll me my we we're we've our you your he she they them their his her
+do does did have has had will would can could just also here there then than very really um uh like
+actually wait sorry no mean""".split())
+RESTART_OVERLAP = 0.6  # share of the previous sentence's content words that the restart repeats
+
+
+def _content(s: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9']+", s.lower()) if w not in _STOP}
+
+
+def self_correct(text: str) -> tuple[str, list[Edit]]:
+    """Apply (b) sentence restarts, then (a) inline same-type corrections. Returns (text, self_correction edits)."""
+    edits: list[Edit] = []
+    kept: list[str] = []
+    pending = ""  # a sentence that is only a marker: "Let me rephrase."
+    for s in re.split(r"(?<=[.!?])\s+", text.strip()):
+        if pending:
+            s, pending = f"{pending} {s}", ""
+        m = _RESTART.match(s)
+        if kept and m and m.end() >= len(s):
+            pending = s
+            continue
+        if kept and m:
+            prev, rest = _content(kept[-1]), _content(s[m.end():])
+            if len(prev) >= 2 and len(prev & rest) / len(prev) >= RESTART_OVERLAP:
+                edits.append(Edit(**{"from": f"{kept[-1]} {m.group(0).strip()}", "to": "", "reason": "self_correction"}))
+                body = s[m.end():]
+                kept[-1] = body[:1].upper() + body[1:]
+                continue
+        kept.append(s)
+    if pending:
+        kept.append(pending)
+    text = " ".join(kept)
+
+    pos = 0
+    while m := _INLINE.search(text, pos):
+        sep = m.group("sep")
+        lead = sep[: re.search(_SC_MARK, sep, re.I).start()]
+        # "Friday actually, Monday is booked": the marker closes the first clause, it does not replace Friday
+        ambiguous = not re.search(r"[,—–-]", lead) and re.search(r"[,—–-]", sep)
+        if ambiguous or not _same_kind(m.group("x"), m.group("y")):  # "Monday, sorry, 5 PM": not a correction
+            pos = m.start() + 1
+            continue
+        prep = m.group("prep") or ""
+        before = _PREP_BEFORE.search(text[:m.start()])
+        if prep and before and before.group(1).lower() == prep.lower():
+            prep = ""  # "on Friday, sorry, on Monday" -> "on Monday"
+        edits.append(Edit(**{"from": text[m.start():m.start("y")], "to": prep, "reason": "self_correction"}))
+        text = text[:m.start()] + (prep + " " if prep else "") + text[m.start("y"):]
+        pos = m.start()  # chains: "5, no, 6, sorry, 7"
+    return text, edits
+
+
+def minimal(verbatim: str, mode: Mode = "minimal") -> RewriteResult:
+    """Regex-remove fillers, collapse immediate repeats, fix spacing/capitalisation. No LLM.
+    Natural/presenter also resolve self-corrections first (before "I mean" is stripped as a filler)."""
     edits: list[Edit] = []
     text = verbatim
+    if mode != "minimal":
+        text, edits = self_correct(text)
 
     def sub(rx, reason, repl=lambda m: ""):
         nonlocal text
@@ -222,7 +352,7 @@ if __name__ == "__main__":
     ap.add_argument("text")
     a = ap.parse_args()
     if a.offline:
-        print(minimal(a.text).model_dump_json(by_alias=True, indent=1))
+        print(minimal(a.text, a.mode).model_dump_json(by_alias=True, indent=1))
     else:
         r, m = asyncio.run(run(a.text, a.mode))
         print(m, r.model_dump_json(by_alias=True, indent=1))

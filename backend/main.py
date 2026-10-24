@@ -19,11 +19,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import asr, decide, guard, mock, rewrite as rw, voice
+from . import asr, decide, guard, mock, rewrite as rw, status, voice
 from .config import settings
 from .errors import ApiError, api_error
 from .models import (
-    Decisions, ErrorBody, GuardResult, HealthResponse, Job, Mode, ProcessAccepted, RewriteRequest,
+    Decisions, ErrorBody, GuardResult, HealthResponse, Job, LiveResponse, Mode, ProcessAccepted, RewriteRequest,
     SpeakRequest, SpeakResponse, TraceEntry, TwinlyHealth, Violation,
 )
 
@@ -34,6 +34,9 @@ MAX_UPLOAD = 10 * 1024 * 1024
 MAX_SPEAK_CHARS = 2400
 MODES = ("minimal", "natural", "presenter")
 HASH_NAME = re.compile(r"^(?:[0-9a-f]{64}|backup_demo)\.m4a$")
+NOTE_SELF_CORRECTED = "Self-corrections fixed by rules (AI editor unavailable)"
+# browsers send audio/webm;codecs=opus (Chrome/Firefox) or audio/mp4 (Safari); curl/tests send octet-stream
+AUDIO_MIME = re.compile(r"^(?:audio/[\w.+-]+|video/(?:webm|mp4|quicktime)|application/octet-stream)?$")
 
 
 # ---------------------------------------------------------------- job store / events
@@ -132,7 +135,7 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
     """full -> retry (stricter, lists violated facts) -> minimal (deterministic) -> original. Always terminates."""
     job = st.job
     job.mode_used = mode
-    job.notes = [n for n in job.notes if not n.startswith("ladder:")]
+    job.notes = [n for n in job.notes if not n.startswith(("ladder:", "AI editor unavailable")) and n != NOTE_SELF_CORRECTED]
     violations: list[str] | None = None
     guard_unavailable = False
     api_down = False  # rewrite call itself failed (auth/network): a stricter retry cannot help
@@ -144,6 +147,8 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
                               model=_models()["rewrite"], label=label, preview=lambda r: r[0].rewrite)
         if not ok:
             api_down = not isinstance(res, ValueError)  # ValueError covers bad JSON / sanity rejects
+            if isinstance(res, rw.GemmaUnavailable):
+                job.notes.append(f"AI editor unavailable: {res}")
             violations = [f"previous attempt failed: {res}"] if rung == "full" else violations
             return False
         result, model_used = res
@@ -184,11 +189,13 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
             return
 
     await _fallback(st, "rewrite", "Falling back to minimal filler removal (no AI)")
-    ok, res = await stage(st, "rewrite", lambda: _async(rw.minimal(job.verbatim)), model="deterministic",
-                          label="minimal", preview=lambda r: r.rewrite)
+    ok, res = await stage(st, "rewrite", lambda: _async(rw.minimal(job.verbatim, mode)), model="deterministic",
+                          label="minimal" if mode == "minimal" else "minimal + self-corrections", preview=lambda r: r.rewrite)
     if ok:
         job.rewrite, job.edits = res.rewrite, res.edits
         if res.rewrite.strip() and await check("minimal"):
+            if any(e.reason == "self_correction" for e in res.edits):
+                job.notes.append(NOTE_SELF_CORRECTED)
             return
 
     await _fallback(st, "rewrite", "Using the original transcript - no changes made")
@@ -244,6 +251,7 @@ async def fail(st: JobState, e: Exception, t0: float) -> None:
 
 
 async def pipeline(st: JobState, src: Path) -> None:
+    global _final_asr
     job, t0 = st.job, time.perf_counter()
     try:
         # 0 convert + 1 asr
@@ -257,8 +265,12 @@ async def pipeline(st: JobState, src: Path) -> None:
                                       preview=lambda _: "16 kHz mono wav")
                 if not ok:
                     return await fail(st, res, t0)
-                ok, res = await stage(st, "asr", lambda: asyncio.wait_for(asr.transcribe(wav), 60), model=_models()["asr"],
-                                      preview=lambda r: r.text)
+                _final_asr += 1  # live passes return busy while this runs (final ASR has priority)
+                try:
+                    ok, res = await stage(st, "asr", lambda: asyncio.wait_for(asr.transcribe(wav), 60),
+                                          model=_models()["asr"], preview=lambda r: r.text)
+                finally:
+                    _final_asr -= 1
         finally:
             if not settings.KEEP_AUDIO:
                 for p in (src, src.with_suffix(".wav")):
@@ -274,6 +286,9 @@ async def pipeline(st: JobState, src: Path) -> None:
                             preview=lambda r: f"mode={r.recommended_mode} register={r.register}" if r.available else (r.note or "unavailable"))
         job.decisions = d if ok else Decisions(available=False, recommended_mode="natural",
                                                note=f"Decisions unavailable ({d}); using Natural mode.")
+        if not settings.MOCK and settings.DECISIONS_ENABLED and settings.OPENAI_API_KEY:
+            status.record("decisions", "ok" if job.decisions.available
+                          else status.from_decisions_note(job.decisions.note) or "error", job.decisions.note or "")
         if not job.decisions.available:
             job.notes.append("Decisions API unavailable - default Natural mode, deterministic guard only")
         mode = await resolve_mode(job, job.mode_requested)
@@ -295,6 +310,7 @@ async def lifespan(_: FastAPI):
     (settings.cache_dir / "uploads").mkdir(parents=True, exist_ok=True)
     task = None
     if not settings.MOCK:
+        status.enable_persist()
         task = asyncio.create_task(asr.load())  # warm model in the background; /api/health shows asr_loaded
     yield
     if task and not task.done():
@@ -335,19 +351,28 @@ async def _cached(key: str, fn: Callable[[], Awaitable[Any]], ttl: float = 30.0)
 
 
 async def _gemma_status() -> str:
+    """Never a paid call. The last real call decides no_credits / auth_error (a free metadata probe passes on a
+    key with no credits); without one, a free models.get catches a bad key or no network."""
     if not settings.GEMINI_API_KEY:
         return "error"
+    last = status.get("gemma")
+    if last in ("no_credits", "auth_error"):
+        return last
     try:
         await asyncio.wait_for(rw._get_client().aio.models.get(model=settings.GEMMA_MODEL), 5)
         return "ok"
-    except Exception:
-        return "error"
+    except Exception as e:
+        acct = rw.classify(e)
+        return acct.status if acct else "error"
 
 
 async def _decisions_status() -> str:
+    """Never a paid call: reports the outcome of the most recent real Decisions call."""
     if not settings.DECISIONS_ENABLED:
         return "off"
-    return "ok" if settings.OPENAI_API_KEY else "error"
+    if not settings.OPENAI_API_KEY:
+        return "error"
+    return status.get("decisions") or "ok"
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -359,16 +384,18 @@ async def health():
         tw = await asyncio.wait_for(voice.health(), 6)
     except Exception:
         tw = TwinlyHealth()
+    gemma = status.get("gemma") if status.get("gemma") in ("no_credits", "auth_error") else None
     return HealthResponse(asr_loaded=asr.loaded(), decisions=await _decisions_status(),
-                          gemma=await _cached("gemma", _gemma_status), twinly=tw, mock=False)
+                          gemma=gemma or await _cached("gemma", _gemma_status), twinly=tw, mock=False)
 
 
-@app.post("/api/process", status_code=202, response_model=ProcessAccepted)
-async def process(audio: UploadFile = File(...), mode: str = Form("auto"), protected_terms: str = Form("")):
-    if mode not in ("auto", *MODES):
-        raise api_error("bad_request", f"Unknown mode '{mode}'.", "Use auto, minimal, natural or presenter.")
-    job_id = uuid.uuid4().hex
-    dest = settings.cache_dir / "uploads" / f"{job_id}{Path(audio.filename or '').suffix[:8] or '.webm'}"
+async def _save_upload(audio: UploadFile, name: str) -> Path:
+    """Stream an upload to cache/uploads with the 10 MB cap and a mime check. Caller deletes the file."""
+    ctype = (audio.content_type or "").split(";")[0].strip().lower()
+    if not AUDIO_MIME.match(ctype):
+        raise api_error("unsupported_media", f"Unsupported file type '{ctype}'.",
+                        "Send an audio recording (webm, mp4/m4a, ogg, wav or mp3).")
+    dest = settings.cache_dir / "uploads" / f"{name}{Path(audio.filename or '').suffix[:8] or '.webm'}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     size = 0
     with dest.open("wb") as f:
@@ -382,12 +409,65 @@ async def process(audio: UploadFile = File(...), mode: str = Form("auto"), prote
     if size == 0:
         dest.unlink(missing_ok=True)
         raise api_error("no_speech", "The recording was empty.", "Check your microphone and try again.")
+    return dest
+
+
+@app.post("/api/process", status_code=202, response_model=ProcessAccepted)
+async def process(audio: UploadFile = File(...), mode: str = Form("auto"), protected_terms: str = Form("")):
+    if mode not in ("auto", *MODES):
+        raise api_error("bad_request", f"Unknown mode '{mode}'.", "Use auto, minimal, natural or presenter.")
+    job_id = uuid.uuid4().hex
+    dest = await _save_upload(audio, job_id)
     job = Job(id=job_id, mode_requested=mode,  # type: ignore[arg-type]
               protected_terms=[t.strip() for t in protected_terms.split(",") if t.strip()])
     st = JobState(job)
     JOBS[job_id] = st
     st.task = asyncio.create_task(pipeline(st, dest))
     return ProcessAccepted(job_id=job_id)
+
+
+# ---------------------------------------------------------------- live draft transcript
+_live_lock = asyncio.Lock()
+_final_asr = 0  # final /api/process ASR passes in flight
+LIVE_MAX_S = 45
+
+
+def _busy(why: str) -> ApiError:
+    return api_error("busy", why, "Skip this tick; the next one will catch up.")
+
+
+@app.post("/api/live", response_model=LiveResponse)
+async def live(audio: UploadFile = File(...), seq: int = Form(...)):
+    """Rough draft transcript of the cumulative recording so far (not the verbatim of record).
+    One pass at a time; final ASR has priority. The audio is never stored, whatever KEEP_AUDIO says."""
+    if _live_lock.locked() or _final_asr:
+        raise _busy("A transcription is already running.")
+    async with _live_lock:
+        t = time.perf_counter()
+        if settings.MOCK:
+            await asyncio.sleep(0.3)
+            words = mock.asr_text().split()
+            n = min(len(words), max(0, seq) * mock.LIVE_WORDS_PER_SEQ)
+            return LiveResponse(seq=seq, text=" ".join(words[:n]), ms=int((time.perf_counter() - t) * 1000))
+        if not asr.loaded():
+            raise _busy("The speech model is still loading.")
+        src = await _save_upload(audio, f"live_{uuid.uuid4().hex}")
+        wav = src.with_suffix(".live.wav")
+        try:
+            await asr.convert(src, wav, max_seconds=LIVE_MAX_S)
+            src.unlink(missing_ok=True)
+            if _final_asr:  # a final pass arrived while we converted: let it have the model
+                raise _busy("Final transcription in progress.")
+            try:
+                text = (await asr.transcribe(wav)).text
+            except ApiError as e:
+                if e.code != "no_speech":
+                    raise
+                text = ""  # silence so far is a normal live state, not an error
+        finally:
+            src.unlink(missing_ok=True)
+            wav.unlink(missing_ok=True)
+        return LiveResponse(seq=seq, text=text, ms=int((time.perf_counter() - t) * 1000))
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job, response_model_by_alias=True)

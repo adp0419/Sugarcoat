@@ -48,7 +48,11 @@ export interface Job {
   guard: Guard;
   trace: TraceEntry[];
   timings: { total_ms: number };
+  notes?: string[]; // e.g. "Self-corrections fixed by rules (AI editor unavailable)"
 }
+
+// POST /api/live (multipart: audio = cumulative recording so far, seq). 429 {error:{code:"busy"}} = skip this tick.
+export interface LiveResult { seq: number; text: string; ms: number; final: false }
 
 export interface SpeakChunk { url: string; seconds: number; cached: boolean }
 export interface SpeakResult { chunks: SpeakChunk[]; total_seconds: number; ms: number }
@@ -57,8 +61,8 @@ export interface ApiError { error: { code: string; message: string; hint: string
 
 export interface Health {
   asr_loaded: boolean;
-  decisions: "ok" | "off" | "error";
-  gemma: "ok" | "error";
+  decisions: "ok" | "off" | "error" | "no_credits" | "auth_error";
+  gemma: "ok" | "error" | "no_credits" | "auth_error";
   twinly: { online: boolean; voice_ready: boolean };
   mock: boolean;
 }

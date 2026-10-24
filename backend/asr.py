@@ -81,9 +81,10 @@ async def _run(*args: str) -> tuple[int, str]:
     return p.returncode, out.decode(errors="replace")
 
 
-async def convert(src: Path, dst: Path) -> None:
-    """Any browser format -> 16 kHz mono wav."""
-    rc, out = await _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-ar", "16000", "-ac", "1", str(dst))
+async def convert(src: Path, dst: Path, max_seconds: float | None = None) -> None:
+    """Any browser format -> 16 kHz mono wav (optionally only the first `max_seconds`)."""
+    cap = ["-t", str(max_seconds)] if max_seconds else []
+    rc, out = await _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(src), *cap, "-ar", "16000", "-ac", "1", str(dst))
     if rc != 0 or not dst.exists():
         raise api_error("asr_failed", "Could not read the recording.", "Try recording again (Chrome or Safari).")
 
