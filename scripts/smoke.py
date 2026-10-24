@@ -3,11 +3,14 @@
     make smoke                       # 5 runs against http://127.0.0.1:8000
     N=3 BASE=http://127.0.0.1:8001 make smoke
     SPEAK=1 make smoke               # also one /api/speak (~$0.10 of Twinly credit) + audio check
+    FAST=1 CLIP=fixtures/sentence_short.m4a make smoke          # stage-mode fast path, one sentence
+    FAST=1 SPEAK=1 N=1 CLIP=fixtures/sentence_short.m4a make smoke  # + /api/speak/async: time to first audio
 
 Exits non-zero if any run fails, any run takes > 60 s, or the speak check fails.
 """
 import argparse
 import os
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -19,9 +22,10 @@ MAX_RUN_S = 60.0
 POLL_S = 0.5
 
 
-def run_once(c: httpx.Client, clip: Path, mode: str) -> tuple[bool, dict | None, float]:
+def run_once(c: httpx.Client, clip: Path, mode: str, fast: bool = False) -> tuple[bool, dict | None, float]:
     t = time.perf_counter()
-    r = c.post("/api/process", files={"audio": (clip.name, clip.read_bytes(), "audio/mp4")}, data={"mode": mode})
+    r = c.post("/api/process", files={"audio": (clip.name, clip.read_bytes(), "audio/mp4")},
+               data={"mode": mode, "fast": "1" if fast else "0"})
     if r.status_code != 202:
         print(f"  process -> {r.status_code} {r.text[:200]}")
         return False, None, time.perf_counter() - t
@@ -67,6 +71,33 @@ def speak_check(c: httpx.Client, job: dict) -> bool:
     return ok
 
 
+def speak_async_check(c: httpx.Client, job: dict, process_wall: float) -> bool:
+    """Stage mode: queue the text, poll until the first chunk is playable. Prints time to first audio."""
+    t = time.perf_counter()
+    r = c.post("/api/speak/async", json={"job_id": job["id"], "text": job["rewrite"]})
+    if r.status_code != 202:
+        print(f"  speak/async -> {r.status_code} {r.text[:300]}")
+        return False
+    sid, first, s = r.json()["speak_id"], None, {}
+    while time.perf_counter() - t < 90:
+        s = c.get(f"/api/speak/{sid}").json()
+        if s.get("chunks") and first is None:
+            first = time.perf_counter() - t
+        if s.get("status") in ("done", "failed"):
+            break
+        time.sleep(0.25)
+    if s.get("status") != "done" or first is None:
+        print(f"  speak/async ended {s.get('status')}: {s.get('error')}")
+        return False
+    print(f"  speak/async: first chunk after {first:.1f} s, {len(s['chunks'])} chunk(s), "
+          f"{sum(ch['seconds'] for ch in s['chunks']):.1f} s audio, cached={[ch['cached'] for ch in s['chunks']]}")
+    print(f"  time to first audio (process {process_wall:.1f} s + render {first:.1f} s, upload->playable): "
+          f"{process_wall + first:.1f} s")
+    a = c.get(s["chunks"][0]["url"])
+    print(f"  audio: {a.status_code} {a.headers.get('content-type')} {len(a.content)} bytes")
+    return a.status_code == 200 and a.headers.get("content-type", "").startswith("audio/mp4")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=os.environ.get("BASE", "http://127.0.0.1:8000"))
@@ -74,6 +105,8 @@ def main() -> int:
     ap.add_argument("--clip", default=os.environ.get("CLIP", str(ROOT / "frontend" / "demo-clip.m4a")))
     ap.add_argument("--mode", default=os.environ.get("MODE", "auto"))
     ap.add_argument("--speak", action="store_true", default=os.environ.get("SPEAK") == "1")
+    ap.add_argument("--fast", action="store_true", default=os.environ.get("FAST") == "1",
+                    help="stage-mode fast path; with --speak uses /api/speak/async")
     a = ap.parse_args()
 
     clip = Path(a.clip)
@@ -87,18 +120,18 @@ def main() -> int:
         fails, walls, last = 0, [], None
         for i in range(a.n):
             print(f"run {i + 1}/{a.n}")
-            ok, job, wall = run_once(c, clip, a.mode)
+            ok, job, wall = run_once(c, clip, a.mode, a.fast)
             walls.append(wall)
             fails += not ok
             last = job if ok else last
-        print(f"\n{a.n - fails}/{a.n} ok; wall s: " + ", ".join(f"{w:.1f}" for w in walls)
-              + f"; max {max(walls):.1f}")
+        print(f"\n{a.n - fails}/{a.n} ok{' (fast=1)' if a.fast else ''}; wall s: "
+              + ", ".join(f"{w:.2f}" for w in walls) + f"; p50 {statistics.median(walls):.2f}; max {max(walls):.2f}")
         if a.speak:
             if last is None:
                 print("speak: skipped (no successful job)")
                 return 1
             print("speak (real Twinly call, ~$0.10):")
-            if not speak_check(c, last):
+            if not (speak_async_check(c, last, walls[-1]) if a.fast else speak_check(c, last)):
                 print("speak check FAILED")
                 return 1
             print("speak check ok")
