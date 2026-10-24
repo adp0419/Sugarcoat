@@ -1,0 +1,16 @@
+{
+  "name": "voiceflow-lite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A dependency-free, cancellable speech cleanup pipeline",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env --watch server.mjs",
+    "preview:ui": "node scripts/preview-ui.mjs",
+    "test": "node --test",
+    "check:google": "node --env-file-if-exists=.env scripts/check-google.mjs",
+    "test:live": "node --env-file-if-exists=.env scripts/smoke-live.mjs"
+  }
+}

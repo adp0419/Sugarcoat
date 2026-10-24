@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Hold to speak. Release for a clean transcript and voice playback.">
+  <title>VoiceFlow Lite</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v4m5-9v14m5-18v22m5-18v14m5-9v4"/></svg>
+        <span>VoiceFlow</span><span class="edition">Lite</span>
+      </div>
+      <span class="header-context">Voice workspace</span>
+    </div>
+  </header>
+  <main id="main">
+    <div class="page-intro">
+      <h1>A clearer take.<br><span>Still your words.</span></h1>
+      <p class="intro">Hold to speak. <br>Release to clean up and play back.</p>
+    </div>
+
+    <div class="workspace">
+      <section class="capture" aria-labelledby="recordLabel">
+        <div class="section-heading">
+          <h2 id="recordLabel">Recording</h2>
+          <p id="status" role="status" aria-live="polite" data-state="ready"><span class="dot" aria-hidden="true"></span><span id="statusText">Connecting…</span></p>
+        </div>
+        <div class="capture-body">
+          <div class="record-instructions">
+            <svg class="record-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="12" y="3" width="8" height="17" rx="4"/><path d="M7 14v2a9 9 0 0 0 18 0v-2M16 25v4m-4 0h8"/></svg>
+            <h3>Start with your voice.</h3>
+            <p>Hold the button while you speak.<br>Release when you’re done.</p>
+          </div>
+          <div class="capture-actions">
+            <button id="talk" class="talk" disabled aria-label="Hold to talk. Release to process." aria-describedby="talkHint">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
+              <span id="talkLabel">Hold to Talk</span>
+            </button>
+            <p id="talkHint" class="hint keyboard-hint">Or focus the button and hold <kbd>Space</kbd></p>
+            <button id="cancel" class="secondary" disabled>Cancel / Stop <kbd aria-hidden="true">Esc</kbd></button>
+            <button id="play" class="secondary playback-recovery" hidden>Enable playback</button>
+          </div>
+          <p id="error" role="alert" hidden></p>
+        </div>
+      </section>
+
+      <div class="results">
+        <section class="transcript-section" aria-labelledby="transcriptLabel">
+          <div class="section-heading">
+            <h2><label id="transcriptLabel" for="transcript">Cleaned transcript</label></h2>
+            <span id="textState" class="state-label">Awaiting recording</span>
+          </div>
+          <textarea id="transcript" readonly rows="6" placeholder="Your words, with a little less noise." aria-label="Cleaned transcript" aria-describedby="transcriptHint"></textarea>
+          <p id="transcriptHint" class="hint transcript-hint">Your cleaned words appear here after you release.</p>
+        </section>
+        <section class="output" aria-labelledby="outputLabel">
+          <div class="section-heading">
+            <h2 id="outputLabel">Voice output</h2>
+            <span id="outputState" class="state-label" role="status">Waiting for audio</span>
+          </div>
+          <div class="output-body">
+            <audio id="outputAudio" controls preload="metadata" aria-label="Generated voice output" hidden></audio>
+            <div id="outputHint" class="output-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 5-6 4H2v6h3l6 4V5Z"/><path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg>
+              <p class="hint">Your generated audio will appear here.<br>Replay it without generating again.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <details id="timingDetails">
+        <summary id="timingSummary">Latency · waiting for a recording</summary>
+        <div class="timing-body">
+          <dl id="timings"></dl>
+          <p class="hint">First sound is a browser output estimate. Provider stages use the server’s own clock.</p>
+        </div>
+      </details>
+    </div>
+
+    <footer>
+      <p class="privacy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg><span>This app keeps no recordings.<br class="mobile-break"> Audio is processed in memory.</span></p>
+      <p id="mode" class="mode">Connecting…</p>
+    </footer>
+  </main>
+</body>
+</html>
