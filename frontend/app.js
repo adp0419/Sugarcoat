@@ -1496,7 +1496,8 @@ async function listDevices() {
   fill($("stage-out"), "audiooutput", "vf-out", "speaker");
   $("stage-out-wrap").hidden = !CAN_SINK;
   $("stage-out-note").hidden = CAN_SINK;
-  $("stage-devices").hidden = !ins.length || ins.some((d) => d.label);
+  // Without mic permission the browser lists no named devices (often none at all): offer to ask.
+  $("stage-devices").hidden = ins.some((d) => d.label);
 }
 async function revealDevices() {
   try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()); }
