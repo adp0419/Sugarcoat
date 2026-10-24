@@ -2,139 +2,145 @@
 
 **Speak naturally. Be heard clearly. Still sound like yourself.**
 
-VoiceFlow takes a messy spoken recording (ums, repeats, "Friday, no wait, Monday"), shows you exactly what you said, proposes a cleaner version, checks that the meaning did not change, and only after you approve it speaks the result in your own cloned voice.
+VoiceFlow takes a messy spoken recording (ums, repeats, "Friday, no wait, Monday"), shows you exactly what you said, proposes a cleaner version, checks that the meaning did not change, and only after you approve it speaks the result in **your own cloned voice**.
 
-Built at UF Gator Hack V (Oct 23-25 2026).
+Built at UF Gator Hack V (Oct 23-25 2026). MIT licensed.
 
-![VoiceFlow demo: demo clip, stage timeline, diff, meaning check blocking a bad rewrite, approve and play](docs/demo.gif)
+![VoiceFlow demo: record, review the edits and the meaning check, approve, hear it](docs/demo.gif)
 
-*UI recorded in headless Chrome against `make mock` sample data; the audio in mock mode is a stand-in, not a cloned voice.*
+*The GIF is recorded in headless Chrome against `make mock` sample data. In mock mode the audio is `fixtures/backup_demo.m4a`: the canonical line rendered once by Twinly in the Mac owner's cloned voice.*
 
 ## Why
 
-Most people have said "um" on a stage. Presenters, students, non-native speakers and people with disfluencies sometimes want an *optional* tool that lets them speak their way and be understood the way they meant. Cleanup tools such as Descript and Cleanvoice already exist. VoiceFlow's focus is putting three things together in one flow:
+Most people have said "um" on a stage. Presenters, students, non-native speakers and people with disfluencies sometimes want an *optional* tool that lets them speak their way and be understood the way they meant. Cleanup tools such as Descript and Cleanvoice already exist. VoiceFlow puts three things together in one flow:
 
-1. **Transparent edits.** Your verbatim words (fillers kept) sit next to the rewrite, with a word-level diff and a reason for every change.
-2. **A meaning guard.** Deterministic checks (numbers, days, names, negation, hedges, quantifiers, self-corrections) plus an AI second opinion. If the rewrite changes what you meant, it is blocked and the pipeline falls back toward your original words.
-3. **Your own voice, with your approval.** Nothing is spoken until you approve the final text.
+1. **Transparent edits.** Your verbatim words (fillers kept) next to the rewrite, with a word-level diff and a reason for every change.
+2. **A meaning guard.** Deterministic checks (numbers, times, days, names, negation, hedges, quantifiers, self-corrections, dropped or added phrases, swapped roles) plus an AI second opinion. If the rewrite changes what you meant, it is blocked and the pipeline falls back toward your own words.
+3. **Your own voice, with your approval.** Nothing is spoken until you approve the final text, and the audio is labelled synthetic.
 
 ## How it works
 
+The page has three steps, always visible: **1 Speak** (record, with a live draft transcript), **2 Review** (verbatim vs. edit, reasons, meaning check, editable text), **3 Hear it** (approve, then play in your voice).
+
 ```
  browser (static HTML + vanilla JS)
-   | record / demo clip                         ^ SSE stage events (polling fallback)
-   v                                            |
+   | record / demo clip        live draft: POST /api/live every ~3 s while recording
+   v                                              ^ SSE stage events (polling fallback)
  FastAPI  /api/process ---> job store ---------- /api/jobs/{id}/events
    |
    +-- convert   ffmpeg -> 16 kHz mono wav
-   +-- hear      CrisperWhisper: verbatim transcript (fillers kept)
+   +-- hear      CrisperWhisper (local): verbatim transcript, fillers kept
    +-- decide    OpenAI Decisions API: filler / repetition / self-correction
    |             probabilities, register, recommended mode
    +-- edit      Gemma 4 via the Gemini API: minimal | natural | presenter
-   +-- verify    meaning guard (rules + Decisions verifier)
-   |             fallback ladder: full -> retry -> minimal -> original text
+   +-- verify    meaning guard: deterministic rules + Decisions verifier
+   |             fallback ladder: Gemma -> stricter Gemma retry ->
+   |             deterministic edit (fillers, repeats, rule-based self-corrections) -> original text
    v
- you approve the text  --->  /api/speak  --->  Twinly (your voice)  --->  audio chunks played in order
+ you approve the text --> /api/speak --> Twinly API --> Twinly app on your Mac (cloned voice)
+                                                    --> m4a chunks, cached by text hash, played in order
 ```
 
-The browser only ever talks to this server. Twinly, OpenAI and Gemini are called from the backend, and keys stay in `.env`.
+The browser only talks to this server. Twinly, OpenAI and Gemini are called from the backend; keys stay in `.env`. Every stage writes a trace entry that the page shows ("How this was made").
 
 ## Screenshots
 
-| Ready: verbatim vs. rewrite, reasons, meaning check | Fallback explained in plain English |
+| Review: verbatim vs. edit, reasons, meaning check | Fallback explained in plain English |
 |---|---|
-| ![Ready state](docs/screenshots/ready.png) | ![Fallback to filler-only edit](docs/screenshots/fallback-minimal.png) |
-| **Stuck stage: the page warns and offers a way out** | **Names check: ASR misheard a name** |
-| ![Watchdog warning](docs/screenshots/watchdog-slow-edit.png) | ![Names check](docs/screenshots/names-check.png) |
-| **Meaning check blocks a wrong day** | **Twinly problem with exact fix steps** |
-| ![Guard blocked](docs/screenshots/guard-blocked.png) | ![Twinly offline](docs/screenshots/speak-twinly-offline.png) |
+| ![Review](docs/screenshots/ready.png) | ![Fallback](docs/screenshots/fallback-minimal.png) |
+| **Meaning check blocks a wrong day** | **Names check: ASR misheard a name** |
+| ![Guard blocked](docs/screenshots/guard-blocked.png) | ![Names check](docs/screenshots/names-check.png) |
+| **Hear it: playing in your voice** | **Twinly problem with exact fix steps** |
+| ![Playing](docs/screenshots/playing.png) | ![Twinly offline](docs/screenshots/speak-twinly-offline.png) |
 
-More in `docs/screenshots/` (dark theme, playback, hard stop, `job_unverified`).
+More in `docs/screenshots/`. They are regenerated by `python frontend/e2e/e2e.py`.
 
 ## When things go wrong
 
-Real APIs fail: on our real runs the AI editor returned 500s, answered after 16-45 s or not at all, the analysis service ran out of credits, and Twinly's voice engine needed a restart. VoiceFlow is built so you are never left guessing:
+On our real runs the AI editor returned 500s, took 16-45 s or ran out of credits, the analysis service had no credits, and Twinly's voice engine needed a restart and crashed when given two lines at once. VoiceFlow is built so you are never left guessing:
 
-- **Never stuck.** The page runs its own watchdog. If the server goes quiet for 15 s, or a stage runs past twice its normal time, it says what is slow and offers **Use text without AI edit** (your transcript with only filler sounds removed) or **Try again**. At 60 s it stops waiting. Every request has a deadline.
-- **Fallbacks explained.** If the AI edit fails or changes your meaning, the pipeline falls back (stricter retry, then filler-only, then your exact words), and a box says why and what was and wasn't changed. The trace panel turns errors like 401, 429, 500 or a timeout into short sentences, with the raw error one click away.
-- **Twinly errors come with fix steps** (voice still starting, clone not built, app unreachable, rate limit). If Twinly can't confirm a line was spoken, speaking is locked for that recording so it is never sent twice.
-- **Names.** Type names before recording. After processing, the Names check shows whether each was heard correctly, misheard (and as what), or kept in the final text, with a one-click fix.
+- **Never stuck.** The page runs its own watchdog: after 15 s without progress, or a stage running past twice its normal time, it says what is slow and offers **Use text without AI edit** or **Try again**; at 60 s it stops waiting. The server has its own 90 s job deadline, and every request has a timeout.
+- **Fallbacks explained.** If Gemma is down or changes your meaning, the ladder falls back and the page says why and what was and wasn't changed. With Gemma offline the deterministic edit still resolves simple self-corrections ("Friday, no wait, Monday at 5 PM" -> "Monday at 5 PM") and the job notes say "Self-corrections fixed by rules (AI editor unavailable)".
+- **Honest health.** `/api/health` reports each service as ok, no credits or auth error from the last real call (a key that exists is not "ok"), and the page shows it.
+- **Twinly errors come with fix steps** (voice still starting, clone not built, app unreachable, rate limit). A `503 job_unverified` is never retried and speaking is locked for that recording, so a line is never paid for or spoken twice. Lines render one at a time (two at once crashed Twinly's engine); a render that outlives the 60 s request cap still lands in the cache, so pressing speak again plays it at no extra cost.
 
-The demo-day checklist is in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+The demo-day checklist is [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ## Quickstart
 
 ```bash
 brew install ffmpeg     # needed on your PATH
 make setup              # venv + dependencies; creates .env from .env.example if you have none
-                        # then open .env and fill in your own keys
+                        # then fill in your own keys in .env
 make warm               # one-time download of the speech-recognition weights
-make mock               # try everything with recorded sample data, no keys needed
+make mock               # everything stubbed with recorded sample data, no keys needed
 make run                # real services, http://localhost:8000
+make smoke              # in another terminal: 5 real runs of the demo clip (SPEAK=1 adds one paid Twinly line)
+make test               # unit tests, no network
 ```
 
-Open <http://localhost:8000> in **Chrome on desktop**. Press **Record** (or `Space`), or use **Use demo clip**. Microphone access needs `localhost` or https.
-
-Frontend only, no server: open the page with `?mock=1` or tick "Offline demo data" in the footer. This runs a local simulation of the whole flow.
+Open <http://localhost:8000> in **Chrome on desktop**. Press **Record** (or `Space`), or **Use demo clip**. Microphone access needs `localhost` or https.
 
 ## Requirements
 
-- macOS for speaking: the Twinly desktop app must be running and signed in, with a built voice clone and a Developer API key. Without it VoiceFlow still gives you the cleaned-up text; speaking is switched off and the page says so.
-- Python 3.11+ and `ffmpeg` on your PATH.
-- Keys in `.env`: `TWINLY_API_KEY`, `OPENAI_API_KEY` (Decisions API), `GEMINI_API_KEY` (Gemma 4 is called through the Gemini API).
-- A modern Chrome. Firefox and Safari record in different formats and are untested.
+- **macOS 26 or newer on Apple silicon, for speaking.** Twinly renders the voice locally in its MLX voice engine. On macOS 15 the engine bundled with Twinly 4.2.1 (MLX 0.31.2) could not load its models: `Failed to load the default metallib ... language version 4.0`, i.e. its Metal shaders need a newer OS. After updating to macOS 27.0.1 it loaded and spoke (see `DIFFICULTIES.md`). Check it with `curl -s http://127.0.0.1:4807/health`.
+- The Twinly desktop app (4.1.2+) running and signed in, a built voice clone, and a Developer API key with credits. Without Twinly you still get the cleaned-up text; speaking is switched off and the page says so.
+- Python 3.11+ (we ran 3.13) and `ffmpeg` on your PATH.
+- Keys in `.env` (see `.env.example`): `TWINLY_API_KEY`, `OPENAI_API_KEY` (Decisions API), `GEMINI_API_KEY` (Gemma 4 is called through the Gemini API).
+- Chrome. Firefox and Safari record in other formats and are untested.
 
-## Accessibility
+## Evaluation
 
-Built with accessibility in mind: system font, light and dark themes, visible focus rings, `Space` toggles recording, stage updates and warnings are announced through `aria-live`, and edits are shown with underline and strike-through as well as colour. What we actually checked, automatically in headless Chrome (`frontend/e2e/e2e.py`): a keyboard-only run from recording to playback; every visible text element is at least 18 px; and every visible text element has at least 4.5:1 contrast against its background, in both themes. We have not tested with a screen reader or with disabled users, and we make no WCAG conformance claim.
+Full tables, raw rows and what was offline: [eval/RESULTS.md](eval/RESULTS.md) (2026-10-24). Summary:
+
+- **Online during the runs:** CrisperWhisper, the meaning guard, the deterministic edit, Twinly. **Offline:** Gemma 4 (`402` no credits on every call) and the Decisions API (`429` no credits). So every output came from the fallback ladder, not Gemma, and the AI verifier did not run. The results measure the ladder and the guard, not Gemma's editing.
+- **Text eval, 8 utterances x 3 modes (n=24):** must-keep facts kept 24/24; must-drop 22/24 (both misses are Minimal mode keeping a superseded "Friday", which the guard then blocks, falling back to the original). Fillers 36 -> 4. Rungs: deterministic 22, original 2, Gemma 0.
+- **Real audio through the real server (n=3):** all 3 jobs reached ready in 2.0-3.1 s with the guard passing; "Friday at five PM no wait sorry Monday at five PM" became "Monday at five PM".
+- **Meaning guard, 80 labelled rewrites:** 0/44 good rewrites blocked, 1/36 bad rewrites passed. On 13 held-out cases written before tuning: 0/8 and 2/5. The cases are hand-written, so read these as "no known false positives", not a rate.
+- **Twinly, real calls (n=8 renders):** a short line takes 4-8 s; a 1,172-char text (3 chunks, 57 s of audio) took 28.6 s, in order; repeating it was a cache hit in 10 ms with no spend.
+- **Tests:** `make test`: 274 passed, 1 expected failure (a known guard false negative), 2026-10-24.
+- **Not done yet:** Gemma and Decisions quality (needs credits), teammates rating "sounds like me".
+
+## Fresh off the frontier
+
+| Technology | Public since | Role in VoiceFlow | What was hard |
+|---|---|---|---|
+| OpenAI Decisions API | public beta Oct 6 2026 | calibrated probabilities for routing (filler, self-correction, register, mode) and a second-opinion meaning verifier | the key never had credits (`429`), so no success response was ever captured. Free validation errors settled the question limit (400 per call) and schema. Health first said "ok" because it only checked a key existed |
+| Gemma 4 via the Gemini API | Apr 2 2026 | the edit engine, three modes, with edit reasons | first key was the wrong type (`401`), then real calls took ~16 s, once 45 s, or ended in `500`, then `402` credits depleted (first treated as a rate limit and retried). Fix: 12 s per call, 20 s total, no retry on 401/402/403, the fallback ladder, and rule-based self-correction so a Gemma outage still fixes "Friday, no wait, Monday" |
+| CrisperWhisper 2.0 (Nyra Labs, `crisperwhisper` 2.0.3) | 2026 (exact date to confirm) | verbatim ASR that keeps um/uh and false starts, with word timings | `transformers` 5.x broke word timestamps (pinned `<5`); it heard "Ariane Patel" for "Aryan Patel", which led to the names field and Names check; live drafts re-transcribe the whole clip, so they skip word timestamps to stay under ~2 s |
+| Twinly Developer API (`/v1/voice/speak`) | 2026 (exact date to confirm) | speaks the approved text in the key owner's own cloned voice, rendered on their Mac | errors arrive inside HTTP 200 job bodies (`voice_not_set_up`, `voice_starting` after ~43 s); the voice engine needed macOS 26+; two concurrent jobs crashed the engine (`There is no Stream(gpu, 12) in current thread`), so lines render one at a time |
+
+Details in [DIFFICULTIES.md](DIFFICULTIES.md).
 
 ## Ethics
 
-- Only the voice of the person who owns the Twinly key is ever used, behind Twinly's own consent gate. VoiceFlow cannot clone anyone else.
-- Never auto-speaks: you approve the exact final text. If the meaning guard flags the text you must tick an explicit override.
-- Generated audio is labelled **synthetic** in the UI.
-- It is an optional assist, not a correction of how anyone should speak. Minimal mode keeps almost everything. We have not yet consulted people who stutter or other affected communities; that is a next step and we claim no endorsements.
+- Only the voice of the person who owns the Twinly key is used, behind Twinly's own setup and consent on their Mac. VoiceFlow cannot clone anyone else.
+- Never auto-speaks: you approve the exact final text. If the meaning guard flags it you must tick an explicit override.
+- Generated audio is labelled **synthetic**.
+- An optional assist, not a correction of how anyone should speak. Minimal mode keeps almost everything. We have not consulted people who stutter or other affected communities yet; that is a next step, and we claim no endorsements.
 - No medical or therapeutic claims.
 
 ## Privacy
 
-Uploaded audio is deleted after transcription (unless the server is started with `KEEP_AUDIO=1`). Your recording in the browser stays in memory for "Play original recording" and is gone when you reload. Transcript text is sent to OpenAI (Decisions), Google (Gemini API) and Twinly (the approved text only) to do their jobs. API keys and audio payloads are never logged.
+Uploaded audio is deleted after transcription (unless started with `KEEP_AUDIO=1`); ASR runs locally. The browser keeps your recording in memory for "Play original" until you reload. Transcript text goes to OpenAI (Decisions) and Google (Gemini API), and only the approved text goes to Twinly. Generated voice audio is cached in `cache/` (gitignored) so a line is never paid for twice; delete the folder to remove it. Keys and audio payloads are never logged.
 
 ## Licence notes
 
-VoiceFlow is MIT licensed (see `LICENSE`). **CrisperWhisper model weights are licensed non-commercially and are not bundled in this repository**; they are downloaded by the user on first run and remain under their own licence. Gemma 4 is used via the Gemini API under Google's terms. Check each dependency's licence before any commercial use.
+VoiceFlow is MIT licensed (`LICENSE`). **CrisperWhisper model weights are under a non-commercial licence and are not bundled**; they are downloaded on first run (`make warm`) and stay under their own licence. Gemma 4 is used through the Gemini API under Google's terms; Twinly and OpenAI under their API terms. `fixtures/backup_demo.m4a` is the team member's own cloned voice, included with their consent for the demo fallback. Check each dependency's licence before any commercial use.
 
 ## Limitations
 
-- One voice (the key owner's), English only.
-- Asynchronous: roughly 10-20 seconds from recording to approved text, plus voice generation time. Not live.
-- Speaking needs a Mac running Twinly; Twinly output is capped at about 2400 characters per approval.
-- The meaning guard is rule-based plus an AI judge. It is a safety net, not a proof; always read the text before approving.
-- The "demo clip" is a computer-generated voice reading the canonical example, not a person (the demo speaker re-records it before finals; see the runbook).
-- The guard can't see meaning changes that touch no number, date, name, negation, hedge or quantifier (for example swapping "major" and "minor"); only the AI verifier catches those, and it is offline when the Decisions API has no credits.
-
-## Tests and evaluation
-
-- **Backend unit tests:** `make test` (no network): 179 passed, 3 expected failures (2026-10-24).
-- **Meaning guard, false positives and negatives:** `python eval/guard_eval.py` runs 67 cases (36 good rewrites, 31 bad ones) hand-written to look like Gemma output; they are not real model outputs. Result: **0/36 good rewrites wrongly blocked, 3/31 bad rewrites wrongly passed.** All three misses are content swaps with no fact signal (see Limitations).
-- **Frontend:** `python frontend/e2e/e2e.py` drives the page in headless Chrome with a fake microphone against a deliberately misbehaving fake backend (`frontend/e2e/scenario_server.py`: hung stages, frozen polling, 401/429/500/timeout fallbacks, every Twinly error) and against the real backend in `MOCK=1`: 55/55 checks pass, including the keyboard-only run and the size/contrast audit. It also regenerates the screenshots and `docs/demo.gif`.
-- **End-to-end pipeline eval** on `eval/utterances.json` with real APIs (`make eval`): pending; needs Gemma, Decisions credits and a ready Twinly voice. Results will go in `eval/RESULTS.md`.
-
-## Fresh off the frontier
-
-| Technology | Released | Role in VoiceFlow | One difficulty |
-|---|---|---|---|
-| OpenAI Decisions API | public beta Oct 6 2026 | routes and scores: edit predicates, mode, register; second-opinion verifier | our key had no credits (`429 credit_balance_exhausted`), so no success response was ever captured; health reported "ok" because it only checked that a key existed, until we added a real 1-question probe. Docs disagreed on the question limit (live validation errors settled it at 400 per call). Without it the guard runs its fixed rules only, and the UI says so |
-| Gemma 4 (via Gemini API) | Apr 2 2026 | the edit engine, three modes | first key was the wrong type (`401 ACCESS_TOKEN_TYPE_UNSUPPORTED`). Later real calls took ~16 s on short input and 45 s once, ended in `500 INTERNAL`, or never answered; the team also saw long "thinking" output adding latency. Fix: 12 s per call, 20 s total, one retry on 500, then the fallback ladder; plus a client watchdog so the page never hangs |
-| CrisperWhisper | arXiv 2607.18934, ~Jul 2026 (exact date to confirm) | verbatim ASR that keeps fillers | `transformers` 5.x breaks it, so it is pinned below 5; it misheard a name ("Ariane Patel" for "Aryan Patel"), which led to the protected-terms and Names check features; weights are non-commercial and not bundled |
-| Twinly Developer API | release date to confirm | speaks the approved text in your own voice | errors such as `voice_not_set_up` and `voice_starting` arrive inside an HTTP 200 job body; `/me` can't tell whether the voice engine is running, and a failed `voice_starting` attempt takes ~43 s. The fix was to quit and reopen the Twinly app; retries are budgeted to fit a 60 s cap |
-
-See `DIFFICULTIES.md` for the problems we hit.
+- One voice (the key owner's), English only, macOS 26+ for speech.
+- Asynchronous: a few seconds to the reviewed text with the fallback rung (Gemma adds ~10-20 s when it works), then 4-8 s per short line of voice. Not real-time.
+- Text to speak is capped at 2,400 characters. Longer texts (5 chunks at ~14 s each) can pass the 60 s speak cap; the renders continue and pressing speak again plays them from cache.
+- The meaning guard is a safety net, not a proof. Known gap: a role swap that keeps the same words in the same order ("A will review B's proposal" -> "B will review A's proposal") passes the deterministic rules; only the AI verifier would catch it. Always read the text before approving.
+- Without Gemma, the deterministic edit removes fillers and single-word repeats and fixes simple self-corrections, but leaves repeated phrases ("I want to I want to").
+- The "Use demo clip" button plays a macOS `say` voice reading the canonical example, not a person.
 
 ## Project layout
 
-`backend/` FastAPI app and pipeline stages · `frontend/` static page (`index.html`, `app.js`, `style.css`, `types.ts`, `mock-job.json`, `demo-clip.m4a`) and `frontend/e2e/` browser tests · `fixtures/` recorded responses for `MOCK=1` · `eval/` guard and pipeline evaluation · `tests/` · `docs/` design notes, screenshots and the demo-day runbook.
+`backend/` FastAPI app and one module per stage (`asr`, `decide`, `rewrite`, `guard`, `voice`, `split`) · `frontend/` static page and `frontend/e2e/` browser tests · `fixtures/` recorded real responses (`real_*.json`) and `MOCK=1` data · `eval/` pipeline eval, guard corpus, `RESULTS.md` · `scripts/smoke.py` · `tests/` · `docs/` design notes, screenshots, runbook, Devpost draft.
 
 ## Credits
 
-Twinly, OpenAI, Google Gemma and CrisperWhisper for the models and APIs. Built with FastAPI, uvicorn, httpx, pydantic and ffmpeg; browser tests use Playwright. All project code was written during the hackathon window.
+Twinly (voice cloning API and Mac app), OpenAI (Decisions API), Google (Gemma 4, Gemini API), Nyra Labs (CrisperWhisper). Built with FastAPI, uvicorn, httpx, pydantic, google-genai, openai, transformers and ffmpeg; browser tests use Playwright. The Twinly client was written from the public docs, not from the example repo. All project code was written during the hackathon window.
