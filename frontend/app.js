@@ -143,7 +143,8 @@ function serviceStates(h) {
   return [
     { key: "asr", name: "Speech recognition", short: "Speech", st: h.asr_loaded ? ["ok", "Ready"] : ["idle", "Loads on your first recording, so the first one is slower"] },
     { key: "gemma", name: "AI editor (Gemma 4)", short: "AI editor", st: ai(h.gemma, "Ready", "rule-based edits only") },
-    { key: "decisions", name: "Analysis (OpenAI Decisions)", short: "Analysis", st: ai(h.decisions, "Ready", "fixed meaning checks only") },
+    { key: "decisions", name: "Analysis (OpenAI Decisions)", short: "Analysis", st: decisionsOn() ? ai(h.decisions, "Ready", "fixed meaning checks only")
+      : ["idle", "Off in Settings: fixed meaning checks only"] },
     { key: "twinly", name: "Your voice (Twinly)", short: "Voice", st: tw.online && tw.voice_ready ? ["ok", "Ready"]
       : tw.online ? ["bad", "Voice clone not set up: speaking is off"] : ["bad", "Offline: you still get the text, speaking is off"] },
   ];
@@ -168,6 +169,7 @@ async function refreshHealth() {
       : warn.length ? ["warn", warn.length + " services limited"] : ["ok", "All services ready"];
     if (h.mock) summary[1] += " · demo data";
     renderHealth(list, h.mock ? "Demo mode: the server returns recorded sample results, not live services." : "", summary);
+    if (!$("settings").hidden) renderPipe();
     const tw = h.twinly && h.twinly.online && h.twinly.voice_ready;
     if (tw !== app.twinlyOnline || !tw) { app.twinlyOnline = !!tw; document.body.dataset.twinly = tw ? "online" : "offline"; }
   } catch {
@@ -413,6 +415,7 @@ function showLive(text, seq) {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (!$("status-pop").hidden) { openPop(false); $("status-btn").focus(); return; }
+    if (!$("settings").hidden) { openSettings(false); return; }
     if (app.editing) { cancelEdit(); return; }
     if (document.body.dataset.state === "recording") { e.preventDefault(); cancelRecording(); $("record").focus(); return; }
     if (app.busy && !app.job) { cancelJob(); return; }
@@ -521,6 +524,7 @@ async function submitAudio(blob) {
     fd.append("mode", app.modeChosen || "auto");
     const terms = $("terms").value.trim();
     if (terms) fd.append("protected_terms", terms);
+    if (!decisionsOn()) fd.append("decisions", "0");
     const { job_id } = await api("/api/process", { method: "POST", body: fd });
     if (run !== app.runId) return;
     app.jobId = job_id;
@@ -1408,6 +1412,91 @@ $("play-btn").addEventListener("click", () => {
 });
 $("replay").addEventListener("click", () => { if (play.chunks.length) { stopPlayback(); playChain(play.chunks); } });
 
+// ---------- settings: the pipeline ----------
+// Every step is shown with what it does, where it runs and how it's doing. Only Decisions can be switched off:
+// the others are what makes the result safe and in your voice.
+const decisionsOn = () => store.get("vf-decisions") !== "0";
+const PIPE = [
+  { key: "mic", name: "Microphone", where: "In your browser", icon: "i-mic",
+    does: "Records what you say: up to 45 seconds, or one sentence at a time in Stage mode. The audio goes only to this server and is deleted after transcription.",
+    down: "Use the demo clip instead.", time: "Live" },
+  { key: "asr", name: "CrisperWhisper", where: "On this Mac", icon: "i-wave",
+    does: "Writes down exactly what you said, including every um, restart and repeat. This word-for-word text is what every later step is checked against.",
+    down: "Required. The first recording after a restart is slower while the model loads (about 10 seconds).", time: "About 1.4 s per sentence" },
+  { key: "decisions", name: "Decisions", where: "OpenAI API", icon: "i-branch", optional: true,
+    does: "Reads how you spoke, picks the edit style (Light, Natural or Presenter), marks sentences to leave alone, and double-checks the meaning after editing.",
+    off: "Natural style is used and the meaning check runs its fixed rules only (dates, times, numbers, names, negations). Saves about half a second per recording.",
+    stage: "Stage mode never uses it: it costs time a live delay doesn't have.", time: "About 0.5 s" },
+  { key: "gemma", name: "Gemma 4", where: "Gemini API", icon: "i-edit",
+    does: "Tidies the words: removes fillers and false starts, applies your self-corrections (“Friday, sorry, Monday” becomes “Monday”) and keeps your phrasing.",
+    down: "Rule-based tidying is used instead: fillers, repeats and self-corrections are still fixed.",
+    stage: "Stage mode uses the rule-based tidying, because Gemma can take 15 seconds or more.", time: "A few seconds; capped at 20 s" },
+  { key: "guard", name: "Meaning check", where: "On this server", icon: "i-shield",
+    does: "Compares the tidied text with what you said and blocks any change to dates, times, numbers, names, negations or hedges. A blocked edit falls back to a safer version.",
+    down: "Always on. With Decisions off it runs its fixed rules only.", time: "Under 50 ms (rules)" },
+  { key: "approve", name: "You approve", where: "You", icon: "i-user",
+    does: "Nothing is spoken until you approve the text. In Stage mode you agree up front, and sentences that fail the meaning check are held for you.",
+    down: "Always on.", time: "Your call" },
+  { key: "twinly", name: "Twinly", where: "Twinly app on your Mac", icon: "i-speaker",
+    does: "Speaks the approved text in your own cloned voice. It renders one line at a time; in Stage mode, sentences that pile up are spoken together so it keeps up.",
+    down: "You still get the text; speaking is off until Twinly is back.", time: "About 5–8 s per line" },
+];
+let pipeSel = "decisions";
+
+// [tone, words] for one step, from the last /api/health.
+function pipeStatus(key) {
+  if (key === "decisions" && !decisionsOn()) return ["idle", "Off: you turned it off"];
+  const svc = app.health ? serviceStates(app.health).find((x) => x.key === key) : null;
+  if (svc) return svc.st;
+  if (key === "mic") return supportProblem() ? ["bad", "Recording isn't available in this browser"] : ["ok", "Ready"];
+  return ["ok", "Always on"];
+}
+function renderPipe() {
+  $("pipe").replaceChildren(...PIPE.map((p, i) => {
+    const [tone] = pipeStatus(p.key), off = p.key === "decisions" && !decisionsOn();
+    const b = el("button", { type: "button", class: "pipe-node", "aria-pressed": String(p.key === pipeSel),
+      "aria-label": (i + 1) + " of " + PIPE.length + ": " + p.name + ", " + pipeStatus(p.key)[1] },
+      el("span", { class: "pipe-ic" }, icon(p.icon)),
+      el("span", { class: "pipe-name", text: p.name }),
+      el("span", { class: "pipe-where", text: p.where }),
+      el("span", { class: "sdot", "data-s": tone === "idle" ? "unknown" : tone, "aria-hidden": "true" }));
+    b.addEventListener("click", () => { pipeSel = p.key; renderPipe(); });
+    return el("li", { class: "pipe-step", "data-off": String(off), "data-key": p.key }, b);
+  }));
+  renderPipeDetail();
+}
+function renderPipeDetail() {
+  const p = PIPE.find((x) => x.key === pipeSel), [tone, words] = pipeStatus(p.key), on = decisionsOn();
+  const row = (label, text) => text ? el("div", { class: "pipe-row" }, el("dt", { text: label }), el("dd", { text })) : null;
+  let control = el("p", { class: "pipe-req" }, icon("i-check-circle", "ic ic-sm"), "Required: this step keeps the result accurate and in your voice.");
+  if (p.optional) {
+    const sw = el("button", { type: "button", class: "switch", role: "switch", "aria-checked": String(on), id: "decisions-switch" },
+      el("span", { class: "switch-knob", "aria-hidden": "true" }));
+    sw.addEventListener("click", () => {
+      store.set("vf-decisions", decisionsOn() ? "0" : "1");
+      renderPipe(); refreshHealth();
+      announce("Decisions " + (decisionsOn() ? "on" : "off") + ". This applies to your next recording.");
+      $("decisions-switch").focus();
+    });
+    control = el("div", { class: "switch-row" }, el("label", { for: "decisions-switch", text: "Use Decisions" }), sw,
+      el("span", { class: "switch-state", text: on ? "On" : "Off" }));
+  }
+  $("pipe-detail").replaceChildren(
+    el("div", { class: "pipe-detail-head" }, el("span", { class: "pipe-ic" }, icon(p.icon)),
+      el("div", {}, el("h3", { text: p.name }), el("p", { class: "help", text: p.where }))),
+    el("p", { class: "pipe-status", "data-s": tone }, el("span", { class: "sdot", "data-s": tone === "idle" ? "unknown" : tone, "aria-hidden": "true" }), words),
+    el("dl", { class: "pipe-facts" }, row("What it does", p.does), row(p.optional ? "When it's off" : "If it's down", p.optional ? p.off : p.down),
+      row("Stage mode", p.stage), row("Typical time", p.time)),
+    control);
+}
+function openSettings(open) {
+  $("settings").hidden = !open;
+  $("settings-btn").setAttribute("aria-pressed", String(open));
+  document.body.dataset.view = open ? "settings" : "";
+  if (open) { renderPipe(); $("h-settings").focus(); refreshHealth(); }
+  else $("settings-btn").focus();
+}
+
 // ---------- stage mode (POST /api/stage/segment) ----------
 // A radio delay. Voice activity cuts the mic into sentences while you keep talking; each one is sent the moment
 // it ends. Text comes back in ~1.5 s, but a Twinly render takes ~5-8 s per line whatever its length, so
@@ -1892,6 +1981,8 @@ $("stage-consent").addEventListener("change", syncStageStart);
 $("stage-duplex").checked = store.get("vf-duplex") === "1";
 $("stage-duplex").addEventListener("change", (e) => store.set("vf-duplex", e.target.checked ? "1" : "0"));
 $("stage-start").addEventListener("click", startStage);
+$("settings-btn").addEventListener("click", () => openSettings($("settings").hidden));
+$("settings-back").addEventListener("click", () => openSettings(false));
 $("stage-in").addEventListener("change", (e) => store.set("vf-in", e.target.value));
 $("stage-out").addEventListener("change", outputChanged);
 $("stage-devices").addEventListener("click", revealDevices);

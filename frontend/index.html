@@ -29,6 +29,11 @@
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
     <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M4 10v4m4-7v10m4-13v16m4-12v8m4-5v2"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8m0-4c0-3 3-4 6-4h4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
     <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4Z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
     <symbol id="i-file-audio" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5M10 17v-4m3 4v-6m3 6v-2"/></symbol>
@@ -45,6 +50,10 @@
       <p class="tagline">Voice studio</p>
     </div>
   </div>
+  <div class="top-actions">
+  <button id="settings-btn" class="status-btn" type="button" aria-pressed="false">
+    <svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg><span>Settings</span>
+  </button>
   <div class="status-wrap">
     <button id="status-btn" class="status-btn" type="button" aria-expanded="false" aria-controls="status-pop">
       <span id="status-dot" class="sdot" data-s="unknown" aria-hidden="true"></span>
@@ -56,6 +65,7 @@
       <ul id="svc-list" class="svc-list"></ul>
       <p id="status-note" class="pop-note" hidden></p>
     </div>
+  </div>
   </div>
 </header>
 
@@ -75,6 +85,17 @@
     <p><strong>New here?</strong> Talk for up to 45 seconds; ums and restarts are fine. We tidy the words, you check them, then you hear them in your own voice.</p>
     <button id="first-run-close" class="icon-btn" type="button" aria-label="Dismiss tip"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
+
+  <!-- Settings: the pipeline, step by step. Only Decisions can be switched off. -->
+  <section id="settings" class="settings" aria-labelledby="h-settings" hidden>
+    <div class="settings-head">
+      <h2 id="h-settings" tabindex="-1">Settings</h2>
+      <button id="settings-back" class="btn" type="button">Done</button>
+    </div>
+    <p class="help">How your words travel, step by step. Select a step to see what it does and how it's doing.</p>
+    <ol id="pipe" class="pipe"></ol>
+    <div id="pipe-detail" class="pipe-detail"></div>
+  </section>
 
   <div class="flow-switch">
     <div class="seg" role="radiogroup" aria-label="How to use VoiceFlow">

@@ -127,6 +127,7 @@ class Job(_Base):
     timings: Timings = Timings()
     protected_terms: list[str] = []
     fast: bool = False  # stage-mode fast path: no Decisions, no retry, Gemma <= 4 s, rules-only guard
+    use_decisions: bool = True  # False = switched off in Settings: no decide call, rules-only guard
     session: Optional[str] = None  # stage mode: echoes POST /api/process `session` / `segment`
     segment: Optional[int] = None
     notes: list[str] = []  # UI banners, e.g. "AI verifier offline", "no changes made"

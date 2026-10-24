@@ -145,12 +145,14 @@ async def _rewrite(verbatim: str, mode: Mode, decisions: Decisions | None, viola
     return await rw.run(verbatim, mode, decisions, violations, protected, budget_s=budget_s)
 
 
-def _guard_label(g: Any, fast: bool) -> str:
+def _guard_label(g: Any, fast: bool, decisions_off: bool = False) -> str:
     """True model label for a finished guard stage (not the hoped-for one)."""
     if settings.MOCK:
         return "mock"
     if fast:
         return "rules only (fast mode)"
+    if decisions_off:
+        return "rules only (Decisions off in Settings)"
     return "rules + Decisions verifier" if isinstance(g, GuardResult) and g.verifier == "online" else RULES_ONLY
 
 
@@ -182,11 +184,12 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
 
     async def check(rung: str) -> bool:
         nonlocal violations, guard_unavailable
-        ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, job.rewrite, mode, job.protected_terms, fast),
+        ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, job.rewrite, mode, job.protected_terms,
+                                                        fast or not job.use_decisions),
                             model=_models()["guard"],
                             preview=lambda r: ("PASS" if r.pass_ else "FAIL: " + "; ".join(v.message for v in r.violations))
                             + f" (verifier {r.verifier})")
-        job.trace[-1].model = _guard_label(g, fast)
+        job.trace[-1].model = _guard_label(g, fast, not job.use_decisions)
         if not ok:
             if isinstance(g, NotImplementedError):  # T2 guard not landed yet: accept, but say so
                 guard_unavailable = True
@@ -197,7 +200,7 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
             violations = None
             return False
         job.guard = g
-        if g.verifier == "offline" and not fast:
+        if g.verifier == "offline" and not fast and job.use_decisions:
             note = "AI verifier offline - deterministic checks only"
             if note not in job.notes:
                 job.notes.append(note)
@@ -313,12 +316,12 @@ async def pipeline(st: JobState, src: Path) -> None:
         job.verbatim, job.words = res.text, res.words
         job.sentences = asr.split_sentences(job.verbatim, job.words)
 
-        # 3 decide (failure -> unavailable, never fatal). Fast path (stage mode) skips it.
-        if job.fast:
-            job.decisions = Decisions(available=False, recommended_mode="natural", note="Skipped (fast mode).")
-            job.trace.append(TraceEntry(stage="decide", ok=True, ms=0, model="skipped (fast mode)",
-                                        preview="skipped (fast mode)"))
-            await emit(st, "stage", {"stage": "decide", "status": "done", "ms": 0, "preview": "skipped (fast mode)"})
+        # 3 decide (failure -> unavailable, never fatal). Fast path (stage mode) and Settings switch skip it.
+        if job.fast or not job.use_decisions:
+            why = "fast mode" if job.fast else "turned off in Settings"
+            job.decisions = Decisions(available=False, recommended_mode="natural", note=f"Skipped ({why}).")
+            job.trace.append(TraceEntry(stage="decide", ok=True, ms=0, model=f"skipped ({why})", preview=f"skipped ({why})"))
+            await emit(st, "stage", {"stage": "decide", "status": "done", "ms": 0, "preview": f"skipped ({why})"})
             await run_ladder_watched(st, await resolve_mode(job, job.mode_requested), t0)
             return await finish(st, t0)
         ok, d = await stage(st, "decide", lambda: asyncio.wait_for(_decide(job.verbatim, job.sentences), 20),
@@ -459,14 +462,15 @@ async def _save_upload(audio: UploadFile, name: str) -> Path:
 
 @app.post("/api/process", status_code=202, response_model=ProcessAccepted)
 async def process(audio: UploadFile = File(...), mode: str = Form("auto"), protected_terms: str = Form(""),
-                  fast: bool = Form(False), session: str | None = Form(None), segment: int | None = Form(None)):
+                  fast: bool = Form(False), session: str | None = Form(None), segment: int | None = Form(None),
+                  decisions: bool = Form(True)):
     if mode not in ("auto", *MODES):
         raise api_error("bad_request", f"Unknown mode '{mode}'.", "Use auto, minimal, natural or presenter.")
     if session is not None and not SESSION_ID.match(session):
         raise api_error("bad_request", "Bad session id.", "Use 1-64 letters, digits, '-' or '_'.")
     job_id = uuid.uuid4().hex
     dest = await _save_upload(audio, job_id)
-    job = Job(id=job_id, mode_requested=mode, fast=fast, session=session, segment=segment,  # type: ignore[arg-type]
+    job = Job(id=job_id, mode_requested=mode, fast=fast, session=session, segment=segment, use_decisions=decisions,  # type: ignore[arg-type]
               protected_terms=[t.strip() for t in protected_terms.split(",") if t.strip()])
     st = JobState(job)
     JOBS[job_id] = st
@@ -605,7 +609,8 @@ async def rewrite_endpoint(req: RewriteRequest):
                 job.status = "ready"
                 raise api_error("bad_request", "Edited text is empty.", "Type the text you want spoken.")
             ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, text, job.mode_used or "natural",
-                                                            job.protected_terms), model=_models()["guard"],
+                                                            job.protected_terms, not job.use_decisions),
+                                model=_models()["guard"],
                                 label="edited text",
                                 preview=lambda r: ("PASS" if r.pass_ else "FAIL: " + "; ".join(v.message for v in r.violations)))
             job.rewrite, job.edits = text, rw.diff_edits(job.verbatim, text)
