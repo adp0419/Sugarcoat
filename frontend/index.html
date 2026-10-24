@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="dark">
 <title>VoiceFlow</title>
 <meta name="description" content="Speak naturally. Be heard clearly. Still sound like yourself.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M8 16v0m5-5v10m5-7v4m5-8v12' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ededed'/%3E%3Cpath d='M8 16v0m5-5v10m5-7v4m5-8v12' stroke='%230a0a0a' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/dm-sans.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="stylesheet" href="style.css">
 </head>
 <body data-state="idle" data-phase="speak">
@@ -41,7 +42,7 @@
     <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M8 16v0m5-5v10m5-7v4m5-8v12"/></svg>
     <div>
       <p class="name">VoiceFlow</p>
-      <p class="tagline">Speak naturally. Be heard clearly. Still sound like yourself.</p>
+      <p class="tagline">Voice studio</p>
     </div>
   </div>
   <div class="status-wrap">
@@ -59,7 +60,14 @@
 </header>
 
 <main id="main">
-  <h1 class="sr-only">VoiceFlow: record, review, then hear it in your voice</h1>
+  <div class="intro">
+    <h1>Your voice. <span>A little clearer.</span></h1>
+    <p>Speak naturally. Refine the words. Still sound like yourself.</p>
+  </div>
+  <div class="workspace-head">
+    <p><svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg> New recording</p>
+    <span>English <span class="workspace-sep" aria-hidden="true">/</span> 45 seconds max</span>
+  </div>
   <p id="announce" class="sr-only" role="status" aria-live="polite"></p>
 
   <div id="first-run" class="hint-box" hidden>
@@ -122,6 +130,12 @@
         <h2 id="h-review" tabindex="-1">Review</h2>
       </header>
 
+      <div class="review-preview empty-visual" aria-hidden="true">
+        <div class="preview-label">An example of a little clarity</div>
+        <p class="preview-before">So, <del>um,</del> the meeting is on <del>Friday, no wait,</del> Monday.</p>
+        <svg class="ic preview-arrow"><use href="#i-chevron"/></svg>
+        <p class="preview-after">The meeting is on Monday.</p>
+      </div>
       <p id="review-empty" class="empty">Your tidied text appears here after you record. You can check and change every word before anything is spoken.</p>
 
       <div id="progress" class="progress" hidden>
@@ -232,6 +246,11 @@
         <h2 id="h-hear">Hear it</h2>
       </header>
 
+      <div class="output-preview empty-visual" aria-hidden="true">
+        <svg class="ic"><use href="#i-speaker"/></svg>
+        <div class="output-wave"><i style="--bar:8px"></i><i style="--bar:14px"></i><i style="--bar:22px"></i><i style="--bar:12px"></i><i style="--bar:28px"></i><i style="--bar:38px"></i><i style="--bar:20px"></i><i style="--bar:32px"></i><i style="--bar:46px"></i><i style="--bar:30px"></i><i style="--bar:18px"></i><i style="--bar:36px"></i><i style="--bar:24px"></i><i style="--bar:42px"></i><i style="--bar:28px"></i><i style="--bar:14px"></i><i style="--bar:22px"></i><i style="--bar:34px"></i><i style="--bar:18px"></i><i style="--bar:10px"></i><i style="--bar:24px"></i><i style="--bar:16px"></i><i style="--bar:8px"></i><i style="--bar:18px"></i><i style="--bar:12px"></i><i style="--bar:6px"></i></div>
+        <span>Your voice, refined</span>
+      </div>
       <p id="hear-empty" class="empty">When the text looks right, approve it here to hear it in your own voice. Nothing is spoken until you do.</p>
 
       <div id="hear-body" hidden>

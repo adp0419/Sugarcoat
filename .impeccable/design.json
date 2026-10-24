@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T00:00:00-04:00",
+  "title": "Design System: VoiceFlow",
+  "extensions": {
+    "shadows": [
+      {
+        "name": "popover",
+        "value": "0 8px 24px rgba(0, 0, 0, 0.3)",
+        "purpose": "Floating service details and tooltips."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "160ms",
+        "purpose": "State feedback; disabled for reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "640px"
+      },
+      {
+        "name": "stack",
+        "value": "900px"
+      },
+      {
+        "name": "wide-review",
+        "value": "1100px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Approve playback or complete an edit.",
+      "html": "<button class=\"primary\">Speak in my voice</button>",
+      "css": ".primary { background:#ededed; color:#0a0a0a; border:1px solid #ededed; border-radius:6px; min-height:44px; padding:0 16px; font:600 14px sans-serif; cursor:pointer; } .primary:hover { background:#cecece; } .primary:focus-visible { outline:3px solid #87bfff; outline-offset:2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "A focused, technical voice studio",
+    "overview": "Dark surfaces and fine rules, inspired by the user\u2019s Vercel reference. The recording and review task leads.",
+    "keyCharacteristics": [
+      "Near-black surfaces",
+      "Off-white actions",
+      "Semantic state color"
+    ],
+    "rules": [
+      {
+        "name": "Readable speech",
+        "body": "Keep transcripts and editable text at least 18px.",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "Preserve meaning checks and explicit approval."
+    ],
+    "donts": [
+      "Add unsupported product controls."
+    ]
+  }
+}

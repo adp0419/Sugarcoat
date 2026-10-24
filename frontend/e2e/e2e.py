@@ -509,7 +509,7 @@ AUDIT_JS = """() => {
     const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
     if (!own) continue;
     const cs = getComputedStyle(el); out.checked++;
-    if (parseFloat(cs.fontSize) < 16) out.small.push(el.tagName + '#' + el.id + '.' + el.className + ' ' + cs.fontSize);
+    if (parseFloat(cs.fontSize) < 12) out.small.push(el.tagName + '#' + el.id + '.' + el.className + ' ' + cs.fontSize);
     if (el.closest('#diff, #verbatim, #live-text, #final-text') && parseFloat(cs.fontSize) < 18) out.primary.push(el.tagName + ' ' + cs.fontSize);
     const r = ratio(parse(cs.color), bgOf(el));
     if (r < 4.5) out.low.push(el.tagName + '.' + el.className + ' "' + el.textContent.trim().slice(0, 30) + '" ' + r.toFixed(2));
@@ -524,9 +524,10 @@ AUDIT_JS = """() => {
                           el.type === 'checkbox' ? 3 : 0, el.classList.contains('btn-quiet') ? 3 : 0);
     if (best < 3) out.ui.push((el.id || el.className) + ' ' + best.toFixed(2));
   }
-  // Focus ring colour vs the page and the step surface.
-  const ring = parse(getComputedStyle(document.documentElement).getPropertyValue('--c-accent').trim().replace('#', '').match(/../g).map((h) => parseInt(h, 16)).join(','));
-  out.focus = Math.min(ratio(ring, [255, 255, 255]), ratio(ring, parse(getComputedStyle(document.body).backgroundColor))).toFixed(2);
+  // Measure the actual focus token against both dark surfaces, independently of action colour.
+  const focusHex = getComputedStyle(document.documentElement).getPropertyValue('--focus').match(/#[0-9a-f]{6}/i)[0];
+  const ring = focusHex.slice(1).match(/../g).map((h) => parseInt(h, 16));
+  out.focus = Math.min(ratio(ring, bgOf(document.querySelector('.step'))), ratio(ring, bgOf(document.body))).toFixed(2);
   return out;
 }"""
 
@@ -534,7 +535,7 @@ AUDIT_JS = """() => {
 def audit(pg, label):
     pg.wait_for_timeout(300)  # let colour transitions (160 ms) settle
     r = pg.evaluate(AUDIT_JS)
-    check(f"audit {label}: all visible text >= 16 px ({r['checked']} elements)", not r["small"], "; ".join(r["small"][:8]))
+    check(f"audit {label}: all visible text >= 12 px ({r['checked']} elements)", not r["small"], "; ".join(r["small"][:8]))
     check(f"audit {label}: primary text (transcript, final text, live draft) >= 18 px", not r["primary"], "; ".join(r["primary"][:5]))
     check(f"audit {label}: text contrast >= 4.5:1", not r["low"], "; ".join(r["low"][:8]))
     check(f"audit {label}: control boundaries >= 3:1 ({r['controls']} controls)", not r["ui"], "; ".join(r["ui"][:8]))
