@@ -9,7 +9,7 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 | Terminal | Owner files | % done | Current task |
 |----------|-------------|--------|--------------|
 | T1 core | backend/models.py, config.py, main.py, asr.py, rewrite.py, __init__.py, fixtures/, requirements.txt, Makefile, .env.example, PROGRESS.md | 70% | MOCK=1 serves full contract; next: real ASR run, integrate T2 |
-| T2 guard/decide/voice | backend/guard.py, decide.py, voice.py, tests/ | 0% | waiting on T1 contract |
+| T2 guard/decide/voice | backend/guard.py, decide.py, voice.py, tests/ | 90% | code + tests done; BLOCKED on keys for G1/G2 (Twinly voice clone not built; OpenAI key has no credits) |
 | T3 frontend | frontend/ | 0% | waiting on T1 contract |
 
 ## T1 core backend + contract
@@ -30,7 +30,8 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] 2  voice.py client + 20 tests + MOCK path (2026-10-23 23:50). G1 PARTIAL: real call returns voice_not_set_up; Mac owner must Build my clone, then re-run `python -m backend.voice "Hello, this is a test."` once
 - [x] 3  guard Decisions verifier pass: `guard.check` runs rules + `decide.verify` in parallel, offline degrade (5 combined tests) (2026-10-23 23:55)
 - [ ] 4  verified on real APIs, fixtures saved
-- [ ] 5  eval/ utterances + run_eval.py
+- [x] 5  eval/utterances.json (8 cases) + eval/run_eval.py, `--offline` works (2026-10-23 23:53)
+- [ ] 4  verified on real APIs (needs: Twinly "Build my clone"; OpenAI credits) then re-run G1/G2 once each
 
 ## T3 frontend
 - [x] 1  frontend/ skeleton (index.html, app.js, style) + record/mode/terms/demo (2026-10-23, offline mock toggle; real server not yet tried)

@@ -1,0 +1,59 @@
+[
+  {
+    "id": "canonical",
+    "text": "So, um, I just wanted to, uh, announce that we're going to have our meeting on Friday—actually, sorry, Monday, at 5 PM, and, um, everyone should be there.",
+    "must_keep": ["Monday", ["5 PM", "5:00 PM", "5pm"], "everyone"],
+    "must_drop": ["Friday", "um", "uh"],
+    "tricky": "self-correction: last stated day wins"
+  },
+  {
+    "id": "hedges",
+    "text": "Um, I think we might, uh, meet around five on Wednesday, maybe.",
+    "must_keep": ["I think", "might", "around", "Wednesday", "maybe"],
+    "must_drop": ["um", "uh"],
+    "tricky": "adversarial: hedges must survive"
+  },
+  {
+    "id": "negations",
+    "text": "So, uh, we're not meeting on Thursday, we're, we're meeting on Friday instead, and nobody should bring food.",
+    "must_keep": [["not meeting", "are not meeting", "will not meet"], "Thursday", "Friday", "nobody"],
+    "must_drop": ["uh"],
+    "tricky": "adversarial: negations must survive"
+  },
+  {
+    "id": "numbers_heavy",
+    "text": "Uh, flight 482 leaves gate 17 at 6:45, and, um, the boarding group is, is 3.",
+    "must_keep": ["482", "17", "6:45", "3"],
+    "must_drop": ["um", "uh"],
+    "tricky": "adversarial: every number must survive"
+  },
+  {
+    "id": "already_fluent",
+    "text": "The quarterly report is due on Friday at noon.",
+    "must_keep": ["quarterly report", "Friday", "noon"],
+    "must_drop": [],
+    "expect_unchanged": true,
+    "tricky": "already fluent: must come back unchanged"
+  },
+  {
+    "id": "number_self_correction",
+    "text": "We need, um, ten, no wait, twelve chairs for the 3 PM, actually 4 PM session.",
+    "must_keep": [["twelve", "12"], "4 PM", "chairs"],
+    "must_drop": [["ten", "10"], "3 PM", "um"],
+    "tricky": "self-correction on a count and a time"
+  },
+  {
+    "id": "stutter_false_start",
+    "text": "I- I want to, uh, I want to tell everyone that the, the deadline moved to April 5th.",
+    "must_keep": ["everyone", "deadline", "April 5"],
+    "must_drop": ["uh", "I- I"],
+    "tricky": "stutter and false start; date must survive"
+  },
+  {
+    "id": "names_quantifiers",
+    "text": "Hey everyone, um, Sarah and Priya will, uh, present on Tuesday. Some of you should bring laptops, but not everyone needs one.",
+    "must_keep": ["Sarah", "Priya", "Tuesday", "Some", ["not everyone", "not all"]],
+    "must_drop": ["um", "uh"],
+    "tricky": "names, quantifiers (some vs everyone), negation, two sentences"
+  }
+]
