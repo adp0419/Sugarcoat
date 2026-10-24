@@ -135,7 +135,7 @@ def test_ladder_uses_self_correction_and_notes_it(monkeypatch):
         raise RuntimeError("402 RESOURCE_EXHAUSTED. Your prepayment credits are depleted.")
     monkeypatch.setattr(rw, "_generate", no_credits)
 
-    async def det_guard(verbatim, rewrite_text, mode="natural", protected=None):
+    async def det_guard(verbatim, rewrite_text, mode="natural", protected=None, rules_only=False):
         from backend.models import GuardResult, Violation
         g = guard.check_rules(verbatim, rewrite_text, mode, protected or ())
         return GuardResult(**{"pass": g.passed, "verifier": "offline",

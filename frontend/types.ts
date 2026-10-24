@@ -51,6 +51,25 @@ export interface Job {
   notes?: string[]; // e.g. "Self-corrections fixed by rules (AI editor unavailable)"
   protected_terms?: string[];
   error?: { code: string; message: string; hint: string } | null;
+  fast?: boolean;          // stage-mode fast path (POST /api/process fast=1)
+  session?: string | null; // stage mode: echoed from POST /api/process
+  segment?: number | null;
+}
+
+// Stage mode (docs/md/10). POST /api/process also takes fast=1, session, segment.
+export interface ProcessAccepted { job_id: string; session: string | null; segment: number | null }
+export interface SessionJob {
+  job_id: string; segment: number | null; status: "running" | "ready" | "failed"; rung: Rung;
+  rewrite: string; guard_pass: boolean | null; total_ms: number;
+}
+export interface SessionResult { session: string; jobs: SessionJob[] }
+export type SpeakState = "queued" | "rendering" | "done" | "failed";
+export interface SpeakAccepted { speak_id: string; queue_position: number; status: SpeakState }
+export interface SpeakStatus {
+  speak_id: string; job_id: string; status: SpeakState;
+  chunks: SpeakChunk[]; // grows in order; on "failed" the listed chunks still play
+  total_chunks: number; queue_position: number;
+  error: { code: string; message: string; hint: string } | null; ms: number; synthetic: true;
 }
 
 // POST /api/live (multipart: audio = cumulative recording so far, seq). 429 {error:{code:"busy"}} = skip this tick.

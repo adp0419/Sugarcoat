@@ -19,12 +19,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import asr, decide, guard, mock, rewrite as rw, status, voice
+from . import asr, decide, guard, mock, rewrite as rw, speakq, status, voice
 from .config import settings
 from .errors import ApiError, api_error
 from .models import (
     Decisions, ErrorBody, GuardResult, HealthResponse, Job, LiveResponse, Mode, ProcessAccepted, RewriteRequest,
-    SpeakRequest, SpeakResponse, TraceEntry, TwinlyHealth, Violation,
+    SessionJob, SessionResponse, SpeakAccepted, SpeakRequest, SpeakResponse, SpeakStatus, TraceEntry,
+    TwinlyHealth, Violation,
 )
 
 log = logging.getLogger("voiceflow")
@@ -35,6 +36,11 @@ MAX_SPEAK_CHARS = 2400
 MODES = ("minimal", "natural", "presenter")
 HASH_NAME = re.compile(r"^(?:[0-9a-f]{64}|backup_demo)\.m4a$")
 NOTE_SELF_CORRECTED = "Self-corrections fixed by rules (AI editor unavailable)"
+FAST_SKIP_GEMMA_S = 600.0
+FAST_GEMMA_S = 4.0  # stage mode: Gemma usually needs ~16 s, so this mostly means "rules unless Gemma is quick"
+RULES_ONLY = "rules only, Decisions offline"
+SESSION_TTL_S = 2 * 3600
+SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # browsers send audio/webm;codecs=opus (Chrome/Firefox) or audio/mp4 (Safari); curl/tests send octet-stream
 AUDIO_MIME = re.compile(r"^(?:audio/[\w.+-]+|video/(?:webm|mp4|quicktime)|application/octet-stream)?$")
 
@@ -117,23 +123,38 @@ async def _decide(verbatim: str, sentences: list[str]) -> Decisions:
     return await decide.analyze(verbatim, sentences)
 
 
-async def _guard(verbatim: str, rewrite_text: str, mode: str = "natural", protected: list[str] | None = None) -> GuardResult:
+async def _guard(verbatim: str, rewrite_text: str, mode: str = "natural", protected: list[str] | None = None,
+                 rules_only: bool = False) -> GuardResult:
     if settings.MOCK:
         return await mock.guard(verbatim, rewrite_text)
+    if rules_only:  # fast path: deterministic rules, no Decisions verifier call
+        g = await asyncio.to_thread(guard.check_rules, verbatim, rewrite_text, mode, protected or ())
+        return GuardResult(**{"pass": g.passed, "verifier": "offline",
+                              "violations": [Violation(**v.to_dict()) for v in g.violations]})
     return await guard.check(verbatim, rewrite_text, mode, protected or ())
 
 
 async def _rewrite(verbatim: str, mode: Mode, decisions: Decisions | None, violations: list[str] | None,
-                   protected: list[str] | None = None):
+                   protected: list[str] | None = None, budget_s: float | None = None):
     if settings.MOCK:
         return await mock.rewrite(mode), "mock"
-    return await rw.run(verbatim, mode, decisions, violations, protected)
+    return await rw.run(verbatim, mode, decisions, violations, protected, budget_s=budget_s)
+
+
+def _guard_label(g: Any, fast: bool) -> str:
+    """True model label for a finished guard stage (not the hoped-for one)."""
+    if settings.MOCK:
+        return "mock"
+    if fast:
+        return "rules only (fast mode)"
+    return "rules + Decisions verifier" if isinstance(g, GuardResult) and g.verifier == "online" else RULES_ONLY
 
 
 # ---------------------------------------------------------------- rewrite + guard with the fallback ladder
 async def run_ladder(st: JobState, mode: Mode) -> None:
     """full -> retry (stricter, lists violated facts) -> minimal (deterministic) -> original. Always terminates."""
     job = st.job
+    fast = job.fast
     job.mode_used = mode
     job.notes = [n for n in job.notes if not n.startswith(("ladder:", "AI editor unavailable")) and n != NOTE_SELF_CORRECTED]
     violations: list[str] | None = None
@@ -143,7 +164,7 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
     async def attempt(rung: str, label: str) -> bool:
         nonlocal violations, guard_unavailable, api_down
         ok, res = await stage(st, "rewrite", lambda: _rewrite(job.verbatim, mode, job.decisions, violations,
-                                                              job.protected_terms),
+                                                              job.protected_terms, FAST_GEMMA_S if fast else None),
                               model=_models()["rewrite"], label=label, preview=lambda r: r[0].rewrite)
         if not ok:
             api_down = not isinstance(res, ValueError)  # ValueError covers bad JSON / sanity rejects
@@ -157,10 +178,11 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
 
     async def check(rung: str) -> bool:
         nonlocal violations, guard_unavailable
-        ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, job.rewrite, mode, job.protected_terms),
+        ok, g = await stage(st, "guard", lambda: _guard(job.verbatim, job.rewrite, mode, job.protected_terms, fast),
                             model=_models()["guard"],
                             preview=lambda r: ("PASS" if r.pass_ else "FAIL: " + "; ".join(v.message for v in r.violations))
                             + f" (verifier {r.verifier})")
+        job.trace[-1].model = _guard_label(g, fast)
         if not ok:
             if isinstance(g, NotImplementedError):  # T2 guard not landed yet: accept, but say so
                 guard_unavailable = True
@@ -171,7 +193,7 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
             violations = None
             return False
         job.guard = g
-        if g.verifier == "offline":
+        if g.verifier == "offline" and not fast:
             note = "AI verifier offline - deterministic checks only"
             if note not in job.notes:
                 job.notes.append(note)
@@ -181,9 +203,16 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
         violations = [v.message for v in g.violations] or ["meaning changed"]
         return False
 
-    if await attempt("full", ""):
+    # fast path: don't spend ~0.3 s on a call that failed for account reasons in the last 10 min (then re-probe)
+    down = None if settings.MOCK else status.recent("gemma", FAST_SKIP_GEMMA_S)
+    if fast and down in ("no_credits", "auth_error"):
+        job.trace.append(TraceEntry(stage="rewrite", ok=False, ms=0, model=_models()["rewrite"],
+                                    error=f"skipped: Gemma {down} (last real call)"))
+        await emit(st, "stage", {"stage": "rewrite", "status": "error", "ms": 0, "preview": f"skipped: Gemma {down}"})
+        job.notes.append(f"AI editor unavailable: Gemma {down.replace('_', ' ')}")
+    elif await attempt("full", ""):
         return
-    if not api_down:
+    if not api_down and not fast:  # fast path: no stricter retry
         await _fallback(st, "rewrite", "Rewrite rejected - retrying with a stricter prompt")
         if await attempt("retry", "retry (stricter)"):
             return
@@ -280,7 +309,14 @@ async def pipeline(st: JobState, src: Path) -> None:
         job.verbatim, job.words = res.text, res.words
         job.sentences = asr.split_sentences(job.verbatim, job.words)
 
-        # 3 decide (failure -> unavailable, never fatal)
+        # 3 decide (failure -> unavailable, never fatal). Fast path (stage mode) skips it.
+        if job.fast:
+            job.decisions = Decisions(available=False, recommended_mode="natural", note="Skipped (fast mode).")
+            job.trace.append(TraceEntry(stage="decide", ok=True, ms=0, model="skipped (fast mode)",
+                                        preview="skipped (fast mode)"))
+            await emit(st, "stage", {"stage": "decide", "status": "done", "ms": 0, "preview": "skipped (fast mode)"})
+            await run_ladder_watched(st, await resolve_mode(job, job.mode_requested), t0)
+            return await finish(st, t0)
         ok, d = await stage(st, "decide", lambda: asyncio.wait_for(_decide(job.verbatim, job.sentences), 20),
                             model=_models()["decide"],
                             preview=lambda r: f"mode={r.recommended_mode} register={r.register}" if r.available else (r.note or "unavailable"))
@@ -291,6 +327,11 @@ async def pipeline(st: JobState, src: Path) -> None:
                           else status.from_decisions_note(job.decisions.note) or "error", job.decisions.note or "")
         if not job.decisions.available:
             job.notes.append("Decisions API unavailable - default Natural mode, deterministic guard only")
+            if not settings.MOCK:  # say so in the trace too: the call "succeeded" only in that it degraded cleanly
+                te = job.trace[-1]
+                te.ok, te.model = False, RULES_ONLY
+                te.error = job.decisions.note or "Decisions unavailable"
+                await _fallback(st, "decide", "Decisions offline - rule-based hints only")
         mode = await resolve_mode(job, job.mode_requested)
 
         await run_ladder_watched(st, mode, t0)
@@ -413,17 +454,59 @@ async def _save_upload(audio: UploadFile, name: str) -> Path:
 
 
 @app.post("/api/process", status_code=202, response_model=ProcessAccepted)
-async def process(audio: UploadFile = File(...), mode: str = Form("auto"), protected_terms: str = Form("")):
+async def process(audio: UploadFile = File(...), mode: str = Form("auto"), protected_terms: str = Form(""),
+                  fast: bool = Form(False), session: str | None = Form(None), segment: int | None = Form(None)):
     if mode not in ("auto", *MODES):
         raise api_error("bad_request", f"Unknown mode '{mode}'.", "Use auto, minimal, natural or presenter.")
+    if session is not None and not SESSION_ID.match(session):
+        raise api_error("bad_request", "Bad session id.", "Use 1-64 letters, digits, '-' or '_'.")
     job_id = uuid.uuid4().hex
     dest = await _save_upload(audio, job_id)
-    job = Job(id=job_id, mode_requested=mode,  # type: ignore[arg-type]
+    job = Job(id=job_id, mode_requested=mode, fast=fast, session=session, segment=segment,  # type: ignore[arg-type]
               protected_terms=[t.strip() for t in protected_terms.split(",") if t.strip()])
     st = JobState(job)
     JOBS[job_id] = st
+    if session:
+        _session_add(session, job_id)
     st.task = asyncio.create_task(pipeline(st, dest))
-    return ProcessAccepted(job_id=job_id)
+    return ProcessAccepted(job_id=job_id, session=session, segment=segment)
+
+
+# ---------------------------------------------------------------- stage-mode sessions (in memory, TTL 2 h)
+SESSIONS: dict[str, dict] = {}  # id -> {"jobs": [job_id], "touched": monotonic}
+
+
+def _session_prune(now: float | None = None) -> None:
+    now = time.monotonic() if now is None else now
+    for sid in [k for k, v in SESSIONS.items() if now - v["touched"] > SESSION_TTL_S]:
+        for jid in SESSIONS.pop(sid)["jobs"]:
+            JOBS.pop(jid, None)  # session jobs go with their session (no audio is kept anyway)
+
+
+def _session_add(sid: str, job_id: str) -> None:
+    _session_prune()
+    s = SESSIONS.setdefault(sid, {"jobs": [], "touched": 0.0})
+    s["jobs"].append(job_id)
+    s["touched"] = time.monotonic()
+
+
+@app.get("/api/session/{session_id}", response_model=SessionResponse)
+async def get_session(session_id: str):
+    _session_prune()
+    s = SESSIONS.get(session_id)
+    if s is None:
+        raise api_error("not_found", "Unknown session.", "The server may have restarted, or it expired after 2 h.")
+    out = []
+    for jid in s["jobs"]:
+        if jid in JOBS:
+            j = JOBS[jid].job
+            out.append(SessionJob(job_id=j.id, segment=j.segment, status=j.status, rung=j.rung,
+                                  rewrite=j.rewrite if j.status == "ready" else "",
+                                  guard_pass=j.guard.pass_ if j.guard and j.status == "ready" else None,
+                                  total_ms=j.timings.total_ms))
+    # segment order; jobs without a segment keep submission order at the end
+    out.sort(key=lambda x: (x.segment is None, x.segment if x.segment is not None else 0))
+    return SessionResponse(session=session_id, jobs=out)
 
 
 # ---------------------------------------------------------------- live draft transcript
@@ -563,6 +646,36 @@ async def speak(req: SpeakRequest):
                                            preview=f"{len(text)} chars" + (f" -> {len(res.chunks)} chunk(s)" if ok else ""),
                                            error=None if ok else "speak failed"))
     return res
+
+
+def _check_speak_text(text: str) -> str:
+    text = text.strip()
+    if not text:
+        raise api_error("bad_request", "Nothing to speak.", "Approve some text first.")
+    if len(text) > MAX_SPEAK_CHARS:
+        raise api_error("too_long", f"Text is {len(text)} characters (max {MAX_SPEAK_CHARS}).", "Shorten the announcement.")
+    return text
+
+
+def _renderer() -> speakq.Renderer:
+    if settings.MOCK:
+        return speakq.MockRenderer(mock.nap_speak, f"/api/audio/{mock.BACKUP_NAME}", mock.BACKUP_SECONDS)
+    return speakq.TwinlyRenderer(voice._get_client())
+
+
+@app.post("/api/speak/async", status_code=202, response_model=SpeakAccepted)
+async def speak_async(req: SpeakRequest):
+    """Stage mode: queue the approved text and return at once; poll GET /api/speak/{speak_id}."""
+    task = speakq.QUEUE.submit(req.job_id, _check_speak_text(req.text), _renderer())
+    return SpeakAccepted(speak_id=task.id, queue_position=speakq.QUEUE.position(task), status=task.status)
+
+
+@app.get("/api/speak/{speak_id}", response_model=SpeakStatus)
+async def speak_status(speak_id: str):
+    task = speakq.QUEUE.get(speak_id)
+    if task is None:
+        raise api_error("not_found", "Unknown speak request.", "It expired (1 h) or the server restarted. Speak again.")
+    return speakq.QUEUE.status(task)
 
 
 @app.get("/api/audio/{name}")

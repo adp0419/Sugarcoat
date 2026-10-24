@@ -48,6 +48,12 @@ def get(provider: str) -> str | None:
     return _last.get(provider, {}).get("state")
 
 
+def recent(provider: str, max_age_s: float) -> str | None:
+    """State only if recorded within max_age_s (so a skip based on it re-probes after a while)."""
+    e = _last.get(provider)
+    return e["state"] if e and time.time() - e.get("at", 0) <= max_age_s else None
+
+
 def from_decisions_note(note: str | None) -> str | None:
     """Classify decide.py's 'Decisions API unavailable (<why>)' note. None = not an account problem."""
     n = (note or "").lower()

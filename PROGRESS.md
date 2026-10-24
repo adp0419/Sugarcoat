@@ -30,13 +30,14 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] R3.4 `make smoke` (scripts/smoke.py; N, BASE, SPEAK=1; exits 1 on failure or a run > 60 s) (2026-10-24 10:35)
 - [x] R3.5 real e2e on :8010 (:8000 held by a server not started by T1): smoke 5/5, wall 2.0-3.5 s, rung=minimal, guard PASS, Friday->Monday fixed by rules; SPEAK=1: 4.0 s audio in 5.2 s, audio/mp4 ok (2026-10-24 10:35)
 ### T1 Round 4 (stage mode backend)
-- [ ] R4.1 POST /api/speak/async + GET /api/speak/{id}: one global FIFO render queue, chunks appear in order, tests with a fake voice
+- [x] R4.1 POST /api/speak/async + GET /api/speak/{id} (backend/speakq.py): global FIFO, one render at a time, chunks published in order as they land, cache hits skip the queue, failed keeps earlier chunks, 1 h TTL; 6 tests with a fake voice; blocking /api/speak unchanged (2026-10-24 10:46)
 - [ ] R4.2 `fast=1` on /api/process (no Decisions, no retry, Gemma <= 4 s, rules-only guard); p50/max measured with and without
-- [ ] R4.3 `session` + `segment` on /api/process, GET /api/session/{id} (TTL 2 h)
-- [ ] R4.4 loose ends: phrase repeats, honest trace labels when AI is offline, mock.speak 3.84 s + fixtures README
+- [x] R4.3 `session` + `segment` on /api/process (echoed, stored on Job), GET /api/session/{id} in segment order, TTL 2 h (jobs pruned with it); test (2026-10-24 10:46)
+- [x] R4.4 phrase repeats (2-4 words) collapse, 13 tests; decide trace ok=false + model "rules only, Decisions offline", guard model shows the real verifier state; mock speak 3.84 s; fixtures/README.md describes the real clip (2026-10-24 10:46)
 - [ ] R4.5 scripts/gemma_probe.py run once, results recorded
 - [ ] R4.6 Latency notes: Twinly fast vs quality model (read-only investigation)
 - [ ] R4.7 (optional) AUTH_ENABLED groundwork: Supabase JWT, encrypted per-user Twinly key, /api/me/voice
+- For T3 (contract, docs/md/10 + frontend/types.ts updated): POST /api/process takes `fast=1`, `session`, `segment` (echoed in the 202). GET /api/session/{id} lists jobs in segment order. POST /api/speak/async -> 202 {speak_id}; poll GET /api/speak/{speak_id} ~500 ms: `chunks` grows in order (play chunk 1 while 2 renders), `queue_position` = renders ahead, on `failed` earlier chunks still play. Job.trace: decide `ok:false` when Decisions is offline (+ SSE `fallback` for decide); guard model label is now the real state.
 
 - [x] R3.6 cold start to asr_loaded 4-5 s; no keys/audio in logs, transformers/crisperwhisper chatter silenced; 415 unsupported_media, 422 for undecodable audio (2026-10-24 10:35)
 

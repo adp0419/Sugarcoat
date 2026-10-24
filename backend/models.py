@@ -126,6 +126,9 @@ class Job(_Base):
     trace: list[TraceEntry] = []
     timings: Timings = Timings()
     protected_terms: list[str] = []
+    fast: bool = False  # stage-mode fast path: no Decisions, no retry, Gemma <= 4 s, rules-only guard
+    session: Optional[str] = None  # stage mode: echoes POST /api/process `session` / `segment`
+    segment: Optional[int] = None
     notes: list[str] = []  # UI banners, e.g. "AI verifier offline", "no changes made"
     error: Optional[ErrorBody] = None
 
@@ -156,8 +159,46 @@ class SpeakRequest(_Base):
     text: str
 
 
+class SpeakAccepted(_Base):
+    speak_id: str
+    queue_position: int = 0
+    status: Literal["queued", "rendering", "done", "failed"] = "queued"
+
+
+class SpeakStatus(_Base):
+    """GET /api/speak/{speak_id}. `chunks` grows in order as each chunk is rendered; on `failed` the chunks
+    already listed are still playable."""
+    speak_id: str
+    job_id: str
+    status: Literal["queued", "rendering", "done", "failed"]
+    chunks: list[AudioChunk] = []
+    total_chunks: int = 0
+    queue_position: int = 0  # renders ahead of this one (0 = rendering now or finished)
+    error: Optional[ErrorBody] = None
+    ms: int = 0
+    synthetic: bool = True
+
+
 class ProcessAccepted(_Base):
     job_id: str
+    session: Optional[str] = None
+    segment: Optional[int] = None
+
+
+class SessionJob(_Base):
+    job_id: str
+    segment: Optional[int] = None
+    status: JobStatus
+    rung: Rung
+    rewrite: str = ""
+    guard_pass: Optional[bool] = None  # None while running / guard unavailable
+    total_ms: int = 0
+
+
+class SessionResponse(_Base):
+    """GET /api/session/{id}: the session's jobs in segment order (stage mode)."""
+    session: str
+    jobs: list[SessionJob] = []
 
 
 class LiveResponse(_Base):
@@ -194,3 +235,4 @@ class ErrorResponse(_Base):
 
 
 Job.model_rebuild()
+SpeakStatus.model_rebuild()

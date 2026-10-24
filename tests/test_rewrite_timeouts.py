@@ -18,7 +18,7 @@ def real_mode(monkeypatch):
     monkeypatch.setattr(settings, "GEMMA_TIMEOUT_S", 0.2)
     monkeypatch.setattr(settings, "GEMMA_BUDGET_S", 1.5)
 
-    async def fake_guard(verbatim, rewrite_text, mode="natural", protected=None):
+    async def fake_guard(verbatim, rewrite_text, mode="natural", protected=None, rules_only=False):
         return GuardResult(**{"pass": True, "verifier": "offline"})
     monkeypatch.setattr(main, "_guard", fake_guard)
 

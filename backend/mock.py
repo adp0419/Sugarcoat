@@ -7,6 +7,7 @@ from .config import settings
 from .models import ASRResult, AudioChunk, Decisions, GuardResult, RewriteResult, SpeakResponse, Violation
 
 BACKUP_NAME = "backup_demo.m4a"
+BACKUP_SECONDS = 3.84  # ffprobe of fixtures/backup_demo.m4a (owner's cloned voice, canonical line)
 LIVE_WORDS_PER_SEQ = 6  # /api/live: each tick reveals ~6 more words (~2 words/s at a 3 s interval)
 
 
@@ -52,8 +53,12 @@ async def guard(verbatim: str, rewrite_text: str) -> GuardResult:
     return ok
 
 
-async def speak(text: str) -> SpeakResponse:
+async def nap_speak() -> None:
     await asyncio.sleep(random.uniform(0.6, 1.2))
-    secs = 3.0
+
+
+async def speak(text: str) -> SpeakResponse:
+    await nap_speak()
+    secs = BACKUP_SECONDS
     return SpeakResponse(chunks=[AudioChunk(url=f"/api/audio/{BACKUP_NAME}", seconds=secs, cached=False)],
                          total_seconds=secs, ms=800)

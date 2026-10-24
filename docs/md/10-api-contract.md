@@ -3,8 +3,19 @@
 All JSON, same origin. Types live in `backend/models.py` (pydantic); mirror in `frontend/types.ts`.
 
 ## POST /api/process
-multipart: `audio` (blob), `mode` (`auto|minimal|natural|presenter`, default auto), `protected_terms` (optional comma list).
-→ 202 `{ "job_id": "uuid" }`. Work continues in background.
+multipart: `audio` (blob), `mode` (`auto|minimal|natural|presenter`, default auto), `protected_terms` (optional comma list),
+optional stage-mode fields: `fast` (`1|0`, default 0), `session` (1-64 of `[A-Za-z0-9_-]`), `segment` (int).
+→ 202 `{ "job_id": "uuid", "session": str|null, "segment": int|null }`. Work continues in background.
+
+`fast=1` (stage mode, one sentence): no Decisions call (trace `decide` = "skipped (fast mode)"), Gemma gets at most
+4 s and is skipped outright if its last real call (≤10 min ago) failed for credits/auth, no stricter retry, guard =
+deterministic rules only (trace model "rules only (fast mode)", no Decisions verifier). Without `fast` nothing changes.
+`session` / `segment` are stored on the Job and echoed; they only let the UI match results to segments.
+
+## GET /api/session/{id}  (stage mode)
+→ `{ session, jobs:[{job_id, segment, status, rung, rewrite, guard_pass, total_ms}] }` in segment order (jobs
+without a segment last, in submission order). `rewrite`/`guard_pass` are filled once the job is `ready`. In memory,
+expires 2 h after the last job was added (its jobs go with it); 404 `not_found` after that. No audio is kept.
 
 ## POST /api/live  (live draft transcript while recording)
 multipart: `audio` = the cumulative recording so far (all MediaRecorder chunks from the start, concatenated, so the
@@ -43,8 +54,12 @@ Fallback: `GET /api/jobs/{id}` returns the current Job (UI polls every 800 ms if
 { id, status: "running|ready|failed", mode_used, rung: "full|retry|minimal|original",
   verbatim, sentences[], decisions{ predicates:{name:prob}, register, recommended_mode, per_sentence[] },
   rewrite, edits[{from,to,reason}], guard{pass, violations[], decisions_probs{}, verifier:"online|offline"},
-  trace[{stage, ok, ms, model, preview, error?}], timings{total_ms}, notes[] }
+  trace[{stage, ok, ms, model, preview, error?}], timings{total_ms}, notes[], fast, session, segment }
 ```
+Trace labels tell the true state: when Decisions is unavailable the `decide` entry has `ok:false`,
+`model:"rules only, Decisions offline"` and the reason in `error` (plus an SSE `fallback` event for `decide`); the
+`guard` entry's model is `"rules + Decisions verifier"`, `"rules only, Decisions offline"` or
+`"rules only (fast mode)"`.
 `notes[]` are UI banners. Exact strings the UI may match: `Self-corrections fixed by rules (AI editor unavailable)`
 (the deterministic rung resolved a self-correction because Gemma failed), `AI editor unavailable: <reason>`
 (e.g. `Gemini key has no credits (402) - add billing in AI Studio`), `AI verifier offline - deterministic checks only`.
@@ -54,6 +69,19 @@ Fallback: `GET /api/jobs/{id}` returns the current Job (UI polls every 800 ms if
 
 ## POST /api/speak
 `{job_id, text}` (text = approved final) → `{ chunks:[{url, seconds, cached}], total_seconds, ms }`. Blocks until all chunks ready (≤ ~20 s), or 202 + poll `GET /api/speak/{speak_id}` if >25 s. Rejects empty text (400) and >2400 chars (413 — 4 chunks cap protects credits).
+
+## POST /api/speak/async  (stage mode)
+`{job_id, text}` → 202 `{ speak_id, queue_position, status }`. Same validation as /api/speak (400 empty, 413 >2400).
+One global FIFO render queue, one render at a time (Twinly's engine crashes on two concurrent jobs), so a second
+segment waits behind the first instead of failing. Fully cached text skips the queue (`status:"done"` at once).
+
+## GET /api/speak/{speak_id}
+→ `{ speak_id, job_id, status:"queued|rendering|done|failed", chunks:[{url, seconds, cached}], total_chunks,
+queue_position, error:{code,message,hint}|null, ms, synthetic:true }`.
+`chunks` grows in order: each chunk is listed as soon as it is rendered, so play chunk 1 while chunk 2 renders.
+On `failed` the chunks already listed are still playable. `queue_position` = renders ahead of this one (0 when
+rendering or finished). Poll every ~500 ms. Kept in memory 1 h after finishing, then 404 `not_found`.
+The blocking `POST /api/speak` is unchanged and shares the same one-at-a-time Twinly client.
 
 ## GET /api/audio/{hash}.m4a   serves cached file, `Content-Type: audio/mp4`.
 ## GET /api/health

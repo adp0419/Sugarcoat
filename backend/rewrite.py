@@ -128,7 +128,7 @@ async def _call(prompt: str, deadline: float) -> tuple[str, str]:
     model, last = settings.GEMMA_MODEL, None
     for attempt in range(2):
         left = deadline - loop.time()
-        if left < 1:
+        if left <= 0 or (attempt and left < 1):  # always try once; no retry with < 1 s left
             break
         try:
             raw = await asyncio.wait_for(_generate(prompt, model), min(settings.GEMMA_TIMEOUT_S, left))
@@ -148,7 +148,7 @@ async def _call(prompt: str, deadline: float) -> tuple[str, str]:
                 model = FALLBACK_MODEL
                 await asyncio.sleep(min(RETRY_BACKOFF_S, max(0.0, deadline - loop.time() - 1)))
     if isinstance(last, asyncio.TimeoutError) or last is None:
-        raise TimeoutError(f"Gemma did not answer within {settings.GEMMA_BUDGET_S:.0f} s")
+        raise TimeoutError("Gemma did not answer within the time budget")
     raise last
 
 
@@ -190,11 +190,13 @@ def diff_edits(a: str, b: str) -> list[Edit]:
 
 
 async def run(verbatim: str, mode: Mode, decisions: Decisions | None = None,
-              violations: list[str] | None = None, protected: list[str] | None = None) -> tuple[RewriteResult, str]:
-    """Gemma rewrite. Returns (result, model_used). Raises on failure so the orchestrator takes the next rung."""
+              violations: list[str] | None = None, protected: list[str] | None = None,
+              budget_s: float | None = None) -> tuple[RewriteResult, str]:
+    """Gemma rewrite. Returns (result, model_used). Raises on failure so the orchestrator takes the next rung.
+    `budget_s` overrides GEMMA_BUDGET_S (stage-mode fast path: 4 s)."""
     if not settings.GEMINI_API_KEY:
         raise api_error("internal", "GEMINI_API_KEY is not set", "Add it to .env or run with MOCK=1.")
-    deadline = asyncio.get_running_loop().time() + settings.GEMMA_BUDGET_S
+    deadline = asyncio.get_running_loop().time() + (budget_s or settings.GEMMA_BUDGET_S)
     prompt = build_prompt(verbatim, mode, decisions, violations=violations, protected=protected)
     raw, model = await _call(prompt, deadline)
     try:
@@ -213,6 +215,8 @@ _FILLER_WORDS = r"(?:u+m+|u+h+|e+r+m?|a+h+|h+m+|mm+|you know|i mean)"
 _FILLER_RE = re.compile(rf"^{_FILLER_WORDS}$", re.I)
 _FILLER_SPAN = re.compile(rf"(?:,\s*)?(?<![\w'-])(?:{_FILLER_WORDS}|like(?=,))\b[,.]?\s*", re.I)
 _STUTTER = re.compile(r"\b(\w+)-\s*(?=\1\b)|\b(\w+)-\s+(?=\2\w)", re.I)  # "I- I want", "an- and" -> drop fragment
+# "I want to, I want to go" -> "I want to go": a 2-4 word phrase said twice in a row (false start)
+_PHRASE_REPEAT = re.compile(r"\b((?:[\w']+[\s,]+){1,3}[\w']+)(?:[\s,]+\1\b)+", re.I)
 _REPEAT = re.compile(r"\b(\w+)(\s*,?\s+\1\b)+", re.I)  # "the the" -> "the"
 
 
@@ -343,6 +347,7 @@ def minimal(verbatim: str, mode: Mode = "minimal") -> RewriteResult:
 
     sub(_FILLER_SPAN, "filler", lambda m: " " if m.group(0).startswith(",") else "")
     sub(_STUTTER, "repetition", lambda m: "")
+    sub(_PHRASE_REPEAT, "repetition", lambda m: m.group(1))
     sub(_REPEAT, "repetition", lambda m: m.group(1))
     text = re.sub(r"\s+([,.!?])", r"\1", text)
     text = re.sub(r"([,.!?])(?=\w)", r"\1 ", text)
