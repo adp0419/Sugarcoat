@@ -1,0 +1,15 @@
+{
+  "available": true,
+  "predicates": {
+    "has_filler": 0.99, "has_repetition": 0.08, "has_self_correction": 0.97,
+    "has_false_start": 0.12, "is_incomplete_thought": 0.03, "contains_hedging": 0.04,
+    "is_already_fluent": 0.01
+  },
+  "register": "announcement",
+  "recommended_mode": "presenter",
+  "per_sentence": [
+    {"index": 0, "text": "So, um, I just wanted to, uh, announce that we're going to have our meeting on Friday—actually, sorry, Monday, at 5 PM, and, um, everyone should be there.",
+     "keep": false, "issues": ["filler", "self_correction"], "needs_edit_prob": 0.99}
+  ],
+  "note": "fixture (hand-written until T2 saves a real response)"
+}

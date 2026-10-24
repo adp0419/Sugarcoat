@@ -1,0 +1,7 @@
+{"rewrite": "I wanted to announce that we're going to have our meeting on Monday at 5 PM, and everyone should be there.",
+ "edits": [
+  {"from": "So, um, ", "to": "", "reason": "filler"},
+  {"from": "just ", "to": "", "reason": "filler"},
+  {"from": "uh, ", "to": "", "reason": "filler"},
+  {"from": "Friday—actually, sorry, ", "to": "", "reason": "self_correction"},
+  {"from": "um, ", "to": "", "reason": "filler"}]}
