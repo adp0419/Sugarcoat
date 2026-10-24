@@ -48,6 +48,15 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] R2-5 deadlines: analyze 15 s, verify 10 s, guard never raises; voice-identity cache + spend-cap tests (2026-10-24 00:46)
 - [ ] R2-6 eval/RESULTS.md from a real run (running)
 
+### T2 Round 3 (real-call budget: 15 lines; used so far: 4)
+- [ ] R3-1 G1 via /api/speak: 1-chunk + 3-chunk, ordering, concurrent, cache hit, ffprobe, fixtures/real_twinly_speak_ok.json
+- [ ] R3-2 fixtures/backup_demo.m4a = real cloned voice; MOCK + fallback path checked
+- [x] R3-3 voice.py from real runs: 2 concurrent jobs crash Twinly's MLX engine -> one at a time; voice_failed re-posted once; identical chunks share one render; render survives the 60 s cap (paid audio lands in cache); per-chunk latency log + redacted last ok/fail body in logs/ (+6 tests) (2026-10-24 10:40)
+- [x] R3-4 guard: 3 known FNs fixed (dropped phrase, added list item, reordered roles) + dropped condition + "let me rephrase" marker; 13 new held-out cases (before the condition rule: 0/8 FP, 2/5 FN); corpus n=80: FP 0/44, FN 1/36 (ho_role_swap); T1 self-correction tests pass check_rules (2026-10-24 10:45)
+- [ ] R3-5 eval/RESULTS.md (real pipeline, rung per output, guard corpus, Twinly latency)
+- [ ] R3-6 README, DIFFICULTIES, RUNBOOK, DEVPOST accurate to the final system
+- [ ] R3-7 release check + submission checklist in RUNBOOK
+
 ## T3 frontend
 - [x] 1  frontend/ skeleton (index.html, app.js, style) + record/mode/terms/demo (2026-10-23, offline mock toggle; real server not yet tried)
 - [x] T3-cp2 stage timeline, SSE + 800 ms polling fallback (2026-10-23)

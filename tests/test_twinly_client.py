@@ -153,7 +153,7 @@ def test_failed_job_raises(tmp_path):
         run(make(tmp_path, f).speak("Hi."))
 
 
-def test_chunks_ordered_and_concurrency_capped_at_two(tmp_path):
+def test_chunks_ordered_and_rendered_one_at_a_time(tmp_path):
     sents = [f"Sentence number {i} " + "word " * 40 + "ends here." for i in range(10)]
     text = " ".join(sents)
     state = {"cur": 0, "max": 0}
@@ -169,7 +169,7 @@ def test_chunks_ordered_and_concurrency_capped_at_two(tmp_path):
 
     c = voice.TwinlyClient("k", "https://t/v1", tmp_path, transport=httpx.MockTransport(handler))
     res = run(c.speak(text))
-    assert len(res.chunks) >= 3 and state["max"] <= 2 and c.max_in_flight <= 2
+    assert len(res.chunks) >= 3 and state["max"] == 1 and c.max_in_flight == 1  # 2 at once crashes the engine
     heard = " ".join((tmp_path / ch.url.rsplit("/", 1)[1]).read_text() for ch in res.chunks)
     assert heard == text
     assert all(len(p) <= 550 for p in [(tmp_path / ch.url.rsplit("/", 1)[1]).read_text() for ch in res.chunks])
@@ -291,3 +291,76 @@ def test_other_key_never_plays_cached_audio_of_another_voice(tmp_path):
 def test_voice_id_does_not_leak_key(tmp_path):
     c = voice.TwinlyClient("twk_live_secretsecret", "https://t/v1", tmp_path)
     assert "secret" not in c.voice_id and len(c.voice_id) < 20
+
+
+def test_voice_failed_reposted_once_then_succeeds(tmp_path):
+    """Real 2026-10-24: two concurrent jobs crashed Twinly's MLX engine; both came back failed, the next worked."""
+    failed = {"id": "j", "object": "job", "status": "failed", "result": None,
+              "error": {"code": "voice_failed", "message": "The voice engine couldn't render that."}}
+    f = Fake(posts=[(200, failed), (200, DONE)])
+    c = make(tmp_path, f)
+    res = run(c.speak("Hi."))
+    assert f.post_calls == 2 and voice.VOICE_FAILED_RETRY_S in c.sleeps and res.chunks[0].seconds == 2.5
+
+
+def test_voice_failed_twice_gives_up(tmp_path):
+    failed = {"id": "j", "status": "failed", "error": {"code": "voice_failed"}}
+    f = Fake(posts=[(200, failed)])
+    with pytest.raises(ApiError) as e:
+        run(make(tmp_path, f).speak("Hi."))
+    assert f.post_calls == 2 and "render" in str(e.value)
+
+
+def test_other_failed_codes_not_reposted(tmp_path):
+    f = Fake(posts=[(200, {"id": "j", "status": "failed", "error": {"code": "voice_not_set_up"}})])
+    with pytest.raises(ApiError):
+        run(make(tmp_path, f).speak("Hi."))
+    assert f.post_calls == 1
+
+
+def test_identical_chunks_in_flight_share_one_render(tmp_path):
+    posts = []
+
+    async def handler(req):
+        posts.append(1)
+        await asyncio.sleep(0.02)
+        return httpx.Response(200, json=DONE)
+
+    c = voice.TwinlyClient("k", "https://t/v1", tmp_path, transport=httpx.MockTransport(handler))
+
+    async def both():
+        return await asyncio.gather(c.speak("Same line."), c.speak("Same line."))
+
+    a, b = run(both())
+    assert len(posts) == 1 and a.chunks[0].url == b.chunks[0].url
+
+
+def test_cancelled_caller_does_not_lose_paid_render(tmp_path):
+    """main.py cancels speak at 60 s; the job keeps going and the retry is a free cache hit."""
+    posts = []
+
+    async def handler(req):
+        posts.append(1)
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, json=DONE)
+
+    c = voice.TwinlyClient("k", "https://t/v1", tmp_path, transport=httpx.MockTransport(handler))
+
+    async def go():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(c.speak("Slow line."), 0.01)
+        await asyncio.sleep(0.1)  # the shielded render finishes in the background
+        return await c.speak("Slow line.")
+
+    res = run(go())
+    assert len(posts) == 1 and res.chunks[0].cached is True
+
+
+def test_render_log_redacts_audio(tmp_path):
+    f = Fake(posts=[(200, DONE)])
+    c = make(tmp_path / "c", f, log_dir=tmp_path / "logs")
+    run(c.speak("Logged line."))
+    row = json.loads((tmp_path / "logs" / "twinly_renders.jsonl").read_text().splitlines()[-1])
+    assert row["posts"] == 1 and row["chars"] == len("Logged line.") and row["seconds"] == 2.5
+    last = (tmp_path / "logs" / "twinly_last_ok.json").read_text()
+    assert AUDIO not in last and f"<base64, {len(AUDIO)} chars>" in last

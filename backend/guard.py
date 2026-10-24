@@ -7,6 +7,7 @@ verifier says. Run: ``python -m backend.guard "verbatim" "rewrite"``.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import difflib
 import re
 import sys
@@ -39,7 +40,7 @@ MONTHS = ["january", "february", "march", "april", "may", "june", "july", "augus
 MONTH_ABBR = {m[:3]: m for m in MONTHS} | {"sept": "september"}
 MONTH_NEEDS_NUM = {"may", "march"} | set(MONTH_ABBR)
 
-MARKER_1 = {"actually", "sorry", "rather", "correction", "oops", "whoops"}
+MARKER_1 = {"actually", "sorry", "rather", "correction", "oops", "whoops", "rephrase"}  # "let me rephrase"
 MARKER_2 = {("i", "mean"), ("no", "wait"), ("wait", "no"), ("scratch", "that"), ("make", "that"), ("or", "rather")}
 
 HEDGE_WORD = {"maybe": "possible", "perhaps": "possible", "possibly": "possible", "might": "possible",
@@ -64,6 +65,18 @@ COMMON_EXTRA = {"um", "uh", "er", "erm", "ah", "hmm", "mm", "okay", "ok", "hey",
                 "apps", "everyone", "everybody", "anyone", "anybody", "someone", "somebody", "anyway", "basically",
                 "actually", "also", "let", "us", "attendee", "attendees", "rsvp", "teammate", "teammates", "signup",
                 "login", "webinar", "internet", "homepage", "smartphone"}
+# content-word rules (dropped phrase, added list item, reordered roles) ignore these: function words and
+# talk that a good edit removes ("I just wanted to quickly announce that...")
+STOPWORDS = {"a", "an", "the", "and", "or", "but", "so", "of", "in", "on", "at", "to", "for", "with", "from", "by",
+             "is", "are", "was", "were", "be", "been", "being", "am", "i", "we", "you", "he", "she", "they", "it",
+             "this", "that", "these", "those", "my", "our", "your", "his", "her", "their", "its", "me", "us", "them",
+             "as", "if", "then", "than", "there", "here", "what", "which", "who", "whom", "when", "where", "why",
+             "how", "do", "does", "did", "done", "have", "has", "had", "will", "would", "can", "could", "should",
+             "shall", "must", "may", "might", "just", "really", "very", "also", "too", "like", "yeah", "okay", "well",
+             "wait", "mean", "going", "want", "wanted", "get", "got", "about", "into", "over", "out", "up", "down",
+             "any", "some", "one", "not", "no", "let", "make", "made", "take", "place", "need", "needs", "know",
+             "announce", "basically", "literally", "honestly", "totally", "thing", "things", "stuff", "kind", "sort",
+             "right", "even", "still", "again", "only", "said", "say", "says", "tell", "told", "please"}
 _DICT_PATHS = ("/usr/share/dict/words", "/usr/share/dict/web2")
 _lower_words: set[str] | None = None
 
@@ -514,6 +527,72 @@ class GuardResult:
         return {"pass": self.passed, "violations": [v.to_dict() for v in self.violations], "facts": self.facts}
 
 
+CONDITIONS = {"if", "unless", "except", "provided"}
+
+
+def _content(ex: Extraction) -> list[Tok]:
+    """Ordered content words: not facts (own rules), not function/discourse words, not -ly adverbs."""
+    fact_pos = {f.pos for f in ex.facts}
+    skip = STOPWORDS | NEGATIONS | set(QUANT) | set(HEDGE_WORD) | set(HEDGE_NEEDS_NUM) | NUM_WORDS | COMMON_EXTRA
+    return [t for t in ex.toks if t.kind == "w" and t.pos not in fact_pos and len(t.val) >= 4
+            and t.val not in skip and not t.val.endswith("ly")]
+
+
+def _stem(w: str) -> str:
+    return w[:5]
+
+
+def _lis(seq: list[int]) -> int:
+    tails: list[int] = []
+    for x in seq:
+        i = bisect.bisect_left(tails, x)
+        tails[i:i + 1] = [x]
+    return len(tails)
+
+
+def _content_rules(o: Extraction, r: Extraction) -> list[Violation]:
+    """Meaning changes with no number/date/name signal (eval/guard_cases.json cs_*): a dropped multi-word phrase,
+    a new item added to a list, or content words rearranged so roles swap ("CS major, business minor")."""
+    vs: list[Violation] = []
+    oc, rc = _content(o), _content(r)
+    o_stems = {_stem(w) for w in o.words}
+    r_stems = {_stem(w) for w in r.words}
+    ows = [t for t in o.toks if t.kind != "p"]
+    # words just before a self-correction marker are allowed to go ("the library, no wait, the gym")
+    corrected = {i for ms, _ in _markers(ows) for i in range(max(0, ms - 14), ms)}
+    run: list[Tok] = []
+    for t in oc + [None]:  # type: ignore[list-item]
+        gone = t is not None and _stem(t.val) not in r_stems and t.pos not in corrected
+        if gone and (not run or t.pos == run[-1].pos + 1):
+            run.append(t)
+            continue
+        if len(run) >= 2:
+            span = " ".join(x.raw for x in run)
+            vs.append(Violation("dropped_fact", span, "", f'The rewrite drops "{span}", which you said.'))
+        run = [t] if gone else []
+    rws = [t for t in r.toks if t.kind != "p"]
+    o_cond = [t.raw for t in ows if t.kind == "w" and t.val in CONDITIONS]
+    r_cond = [t.raw for t in rws if t.kind == "w" and t.val in CONDITIONS]
+    if len(r_cond) < len(o_cond):
+        vs.append(Violation("dropped_fact", ", ".join(o_cond), ", ".join(r_cond),
+                            f'You set a condition ("{o_cond[0]} ..."), but the rewrite drops it.'))
+    content_pos = {t.pos for t in rc}
+    for i, t in enumerate(rws):
+        if t.kind == "w" and t.val in ("and", "or", "plus"):
+            nxt = next((x for x in rws[i + 1:i + 4] if x.pos in content_pos), None)
+            if nxt is not None and _stem(nxt.val) not in o_stems:
+                vs.append(Violation("invented_fact", "", f"{t.raw} {nxt.raw}",
+                                    f'The rewrite adds "{nxt.raw}", which you never said.'))
+    first: dict[str, int] = {}
+    for i, t in enumerate(oc):
+        first.setdefault(_stem(t.val), i)
+    seq = [first[_stem(t.val)] for t in rc if _stem(t.val) in first]
+    if len(seq) >= 4 and _lis(seq) / len(seq) < 0.6:
+        vs.append(Violation("reordered", " ".join(t.raw for t in oc[:8]), " ".join(t.raw for t in rc[:8]),
+                            "The rewrite rearranges what you said, so who/what each part refers to may have swapped."))
+    return vs
+
+
 def _wc(text: str) -> int:
     return len(re.findall(r"[A-Za-z0-9][A-Za-z0-9'’:.\-]*", text))
 
@@ -587,6 +666,9 @@ def check_rules(original: str, rewrite: str, mode: str = "natural", protected: I
         if (grp in o.modals) != (grp in r.modals):
             vs.append(Violation("modal", o.modals.get(grp, ""), r.modals.get(grp, ""),
                                 "The strength of a commitment changed (must/should/can)."))
+
+    # content words: dropped phrase, added list item, swapped roles
+    vs.extend(_content_rules(o, r))
 
     # 6: length sanity
     n_o, n_r = _wc(original), _wc(rewrite)

@@ -10,7 +10,9 @@ from backend import guard
 ROOT = Path(__file__).resolve().parent.parent
 CASES = json.loads((ROOT / "eval" / "guard_cases.json").read_text())
 # Semantic changes with no number/date/name/negation/hedge/quantifier signal: left to the Decisions verifier.
-KNOWN_FN = {"cs_swapped", "cs_added", "cs_dropped"}
+# cs_swapped/cs_added/cs_dropped were fixed in round 3 by the content-word rules. ho_role_swap keeps the same words
+# in the same order ("A will review B's proposal" -> "B will review A's proposal"): no deterministic signal.
+KNOWN_FN = {"ho_role_swap"}
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
@@ -55,3 +57,24 @@ def test_sentence_start_name_swap_blocked():
     assert not guard.check_rules("Sarah will present on Tuesday.", "Priya will present on Tuesday.").passed
     assert guard.check_rules("Sarah will, uh, present on Tuesday.", "Sarah will present on Tuesday.").passed
     assert guard.check_rules("um attendance is mandatory", "Attendance is mandatory.").passed
+
+
+def test_content_rules_round3():
+    o = "Wait, I'm actually a computer science major, but with a minor in business administration."
+    assert {v.rule for v in guard.check_rules(o, "I'm a computer science major.").violations} == {"dropped_fact"}
+    assert "reordered" in {v.rule for v in guard.check_rules(
+        o, "I'm a business administration major with a minor in computer science.").violations}
+    assert "finance" in guard.check_rules(o, "I'm a computer science major with a minor in business administration "
+                                             "and finance.").violations[0].message
+    # a corrected content word may go; a list may be reordered
+    assert guard.check_rules("We'll meet at the city library, no wait, the school gym, at 4.",
+                             "We'll meet at the school gym at 4.").passed
+    assert guard.check_rules("Bring your laptop, your charger and a notebook.",
+                             "Bring a notebook, your laptop and your charger.").passed
+    assert not guard.check_rules("You can leave early if your lab report is finished.", "You can leave early.").passed
+
+
+def test_let_me_rephrase_is_a_correction_marker():
+    src = "The meeting is in room 204 on Monday. Let me rephrase. the meeting is in room 210 on Monday."
+    assert guard.check_rules(src, "The meeting is in room 210 on Monday.").passed
+    assert not guard.check_rules(src, "The meeting is in room 204 on Monday.").passed

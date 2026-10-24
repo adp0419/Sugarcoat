@@ -1,9 +1,11 @@
 """Twinly speak (docs/md/04). OWNER: T2.
 
 ``speak(text)`` packs text into <=550-char chunks, sends them to Twinly's
-``POST /v1/voice/speak`` (2 concurrent, <=30 req/min), caches audio by
+``POST /v1/voice/speak`` (one at a time, <=30 req/min), caches audio by
 sha256(text + voice) and returns ordered chunks. A 503 ``job_unverified`` is
-never retried: the job may have run and been billed.
+never retried: the job may have run and been billed. Identical chunks in flight
+share one render, and a render outlives a cancelled caller (main.py's 60 s cap),
+so the user's retry is a cache hit instead of a second paid line.
 
 CLI: ``python -m backend.voice "text"`` (set MOCK=1 to skip the network).
 """
@@ -12,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import copy
 import hashlib
 import json
 import os
@@ -31,7 +34,10 @@ from .models import AudioChunk, SpeakResponse, TwinlyHealth
 
 CHUNK_CHARS = 550          # packer limit (Twinly accepts <=600)
 MAX_TOTAL_CHARS = 2400
-MAX_CONCURRENT = 2
+# Twinly docs allow 2 Mac jobs at once, but two concurrent voice.speak jobs crash its MLX voice engine
+# ("There is no Stream(gpu, 12) in current thread", 2026-10-24; DIFFICULTIES.md), failing both. Serialise.
+MAX_CONCURRENT = 1
+VOICE_FAILED_RETRY_S = 3.0  # the engine restarts itself in ~2 s after a crash
 RATE_PER_MIN = 30
 JOB_TIMEOUT_S = 60.0
 RENDER_BUDGET_S = 55.0     # main.py cancels voice.speak at 60 s; never start an attempt that can't finish
@@ -44,6 +50,14 @@ _TERMINAL_FAIL = {"failed", "canceled", "expired"}
 
 class _VoiceStarting(Exception):
     """Twinly's voice engine is still warming up; the speak job should be re-posted."""
+
+
+class _VoiceFailed(Exception):
+    """The job ran and failed with no audio (e.g. engine crash). Safe to re-post once: nothing was spoken."""
+
+    def __init__(self, resp: httpx.Response, code: str):
+        super().__init__(code)
+        self.resp, self.code = resp, code
 
 
 def _find(obj: Any, key: str):
@@ -105,7 +119,7 @@ class _RateLimiter:
 class TwinlyClient:
     def __init__(self, key: str, base: str, cache_dir: Path, *, transport: httpx.AsyncBaseTransport | None = None,
                  sleep: Callable[[float], Awaitable] = asyncio.sleep, clock: Callable[[], float] = time.monotonic,
-                 spend_path: Path | None = None, allow_spend: bool = False):
+                 spend_path: Path | None = None, allow_spend: bool = False, log_dir: Path | None = None):
         self.key = key.strip()
         self.base = base.strip().rstrip("/")
         self.cache_dir = cache_dir
@@ -118,7 +132,9 @@ class TwinlyClient:
         self.limiter = _RateLimiter(RATE_PER_MIN, clock, sleep)
         self.http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(40.0, connect=10.0),
                                       headers={"Authorization": f"Bearer {self.key}"})
+        self.log_dir = log_dir
         self._health: tuple[float, TwinlyHealth] | None = None
+        self._inflight: dict[str, asyncio.Future] = {}
         self.in_flight = 0
         self.max_in_flight = 0
 
@@ -174,6 +190,36 @@ class TwinlyClient:
         self.spend_path.parent.mkdir(parents=True, exist_ok=True)
         self.spend_path.write_text(json.dumps(st))
 
+    # ---- render log (logs/ is gitignored) --------------------------------
+    def _log_render(self, h: str, text: str, data: dict, stats: dict, ms: int, seconds: float, size: int) -> None:
+        """Per-chunk latency line + the last success body with audio_b64 replaced by its length."""
+        if not self.log_dir:
+            return
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "hash": h[:12], "chars": len(text), "ms": ms,
+                   "posts": stats["posts"], "polls": stats["polls"], "first_status": stats["first_status"],
+                   "seconds": seconds, "bytes": size}
+            with (self.log_dir / "twinly_renders.jsonl").open("a") as f:
+                f.write(json.dumps(row) + "\n")
+            (self.log_dir / "twinly_last_ok.json").write_text(json.dumps(_redact(data), indent=2))
+        except OSError:
+            pass
+
+    def _log_fail(self, data: Any) -> None:
+        if not self.log_dir:
+            return
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            err = _find(data, "error")
+            row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "failed": True, "status": _find(data, "status"),
+                   "code": _find(err, "code") if err else None, "message": _find(err, "message") if err else None}
+            with (self.log_dir / "twinly_renders.jsonl").open("a") as f:
+                f.write(json.dumps(row) + "\n")
+            (self.log_dir / "twinly_last_fail.json").write_text(json.dumps(_redact(data), indent=2))
+        except OSError:
+            pass
+
     # ---- http ----------------------------------------------------------
     def _raise_for(self, resp: httpx.Response, code: str):
         s = resp.status_code
@@ -194,7 +240,7 @@ class TwinlyClient:
             return api_error("internal", "Twinly failed to render the voice.", "Retry once; check the Twinly app.")
         return api_error("internal", f"Twinly error {s} {code}".strip(), "See the server log.")
 
-    async def _post_speak(self, text: str) -> httpx.Response:
+    async def _post_speak(self, text: str, stats: dict | None = None) -> httpx.Response:
         n429 = starting = 0
         retried503 = False
         while True:
@@ -205,6 +251,9 @@ class TwinlyClient:
             except httpx.HTTPError as e:  # not retried: the job may already exist
                 raise api_error("twinly_offline", f"Could not reach Twinly ({type(e).__name__}).",
                                 "Check wifi and that the Twinly Mac app is awake.")
+            if stats is not None:
+                stats["posts"] += 1
+                stats.setdefault("first_status", r.status_code)
             if r.status_code in (200, 202):
                 self._spend_add()
                 return r
@@ -231,7 +280,7 @@ class TwinlyClient:
                 continue
             raise self._raise_for(r, code)
 
-    async def _await_job(self, first: httpx.Response) -> dict:
+    async def _await_job(self, first: httpx.Response, stats: dict | None = None) -> dict:
         body = _json(first)
         deadline = self.clock() + JOB_TIMEOUT_S
         resp, data = first, body
@@ -241,8 +290,11 @@ class TwinlyClient:
             status = str(_find(data, "status") or "").lower()
             if status in _TERMINAL_FAIL:
                 code = str(_find(data, "code") or "")
+                self._log_fail(data)
                 if code == "voice_starting":  # arrives inside a 200 job body, not as an HTTP error
                     raise _VoiceStarting()
+                if status == "failed" and code in ("", "voice_failed"):
+                    raise _VoiceFailed(resp, code or "voice_failed")
                 raise self._raise_for(resp, code or "voice_failed")
             if status == "needs_approval":
                 raise api_error("internal", "Twinly is waiting for approval on the Mac.",
@@ -252,6 +304,8 @@ class TwinlyClient:
                 raise api_error("internal", "Twinly returned no job id.", "See fixtures/real_twinly_speak.json.")
             if self.clock() > deadline:
                 raise api_error("twinly_offline", "Twinly took too long.", "Check the Twinly app is awake.")
+            if stats is not None:
+                stats["polls"] += 1
             try:
                 resp = await self.http.get(f"{self.base}/jobs/{job_id}", params={"wait": 25})
             except httpx.HTTPError as e:
@@ -262,21 +316,39 @@ class TwinlyClient:
             data = _json(resp)
 
     async def render(self, text: str) -> AudioChunk:
-        """One chunk -> audio file (cache first)."""
+        """One chunk -> audio file (cache first, then join an identical render already in flight)."""
         h = self.chunk_hash(text)
         hit = self._cached(h)
         if hit:
             return hit
+        fut = self._inflight.get(h)
+        if fut is None or fut.done():
+            fut = asyncio.ensure_future(self._render(text, h))
+            self._inflight[h] = fut
+            fut.add_done_callback(lambda f, h=h: self._settled(h, f))
+        # shield: if the caller is cancelled (main.py's 60 s cap), the paid render still lands in the cache
+        return await asyncio.shield(fut)
+
+    def _settled(self, h: str, fut: asyncio.Future) -> None:
+        if self._inflight.get(h) is fut:
+            del self._inflight[h]
+        if not fut.cancelled():
+            fut.exception()  # mark retrieved: a render nobody waits for anymore must not warn
+
+    async def _render(self, text: str, h: str) -> AudioChunk:
+        stats = {"posts": 0, "polls": 0}
+        t_start = time.perf_counter()
         async with self.sem:
             self.in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self.in_flight)
             try:
                 started = self.clock()
+                failed_retried = False
                 for attempt in range(4):  # docs/md/04: voice_starting -> wait 5 s, retry up to 3x
                     t_try = self.clock()
-                    first = await self._post_speak(text)
+                    first = await self._post_speak(text, stats)
                     try:
-                        data = await self._await_job(first)
+                        data = await self._await_job(first, stats)
                         break
                     except _VoiceStarting:
                         # A real voice_starting job fails after ~43 s (fixtures/real_twinly_voice_starting.json):
@@ -286,6 +358,15 @@ class TwinlyClient:
                             raise api_error("internal", "Twinly voice is still starting.",
                                             "Quit and reopen the Twinly app so its voice engine starts, then retry.")
                         await self.sleep(5)
+                    except _VoiceFailed as e:
+                        took = self.clock() - t_try
+                        if failed_retried or (self.clock() - started) + VOICE_FAILED_RETRY_S + took > RENDER_BUDGET_S:
+                            raise self._raise_for(e.resp, e.code)
+                        failed_retried = True
+                        await self.sleep(VOICE_FAILED_RETRY_S)
+                else:
+                    raise api_error("internal", "Twinly could not render the voice.",
+                                    "Quit and reopen the Twinly app, then retry.")
             finally:
                 self.in_flight -= 1
         b64 = _find(data, "audio_b64")
@@ -300,7 +381,9 @@ class TwinlyClient:
             seconds = float(seconds)
         except (TypeError, ValueError):
             seconds = round(max(1.0, len(text) / 15.0), 1)
-        return self._store(h, audio, seconds)
+        chunk = self._store(h, audio, seconds)
+        self._log_render(h, text, data, stats, int((time.perf_counter() - t_start) * 1000), seconds, len(audio))
+        return chunk
 
     async def speak(self, text: str) -> SpeakResponse:
         t0 = time.perf_counter()
@@ -328,6 +411,24 @@ class TwinlyClient:
             res = TwinlyHealth(online=False, voice_ready=False)
         self._health = (self.clock(), res)
         return res
+
+
+def _redact(data: Any) -> Any:
+    """Copy of a Twinly body with every audio_b64 replaced by its length (for fixtures and logs)."""
+    out = copy.deepcopy(data)
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == "audio_b64" and isinstance(v, str):
+                    o[k] = f"<base64, {len(v)} chars>"
+                else:
+                    walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(out)
+    return out
 
 
 def _voice_ready(me: Any) -> bool:
@@ -359,7 +460,7 @@ def _get_client() -> TwinlyClient:
     if _client is None:
         _client = TwinlyClient(settings.TWINLY_API_KEY, settings.TWINLY_BASE, settings.cache_dir,
                                spend_path=settings.logs_dir / "spend.json",
-                               allow_spend=os.environ.get("ALLOW_SPEND") == "1")
+                               allow_spend=os.environ.get("ALLOW_SPEND") == "1", log_dir=settings.logs_dir)
     return _client
 
 

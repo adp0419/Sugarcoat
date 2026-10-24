@@ -436,5 +436,96 @@
    "computer science",
    "business administration"
   ]
+ },
+ {
+  "id": "ho_venue_correction",
+  "original": "We'll meet at the city library, no wait, the school gym, at 4.",
+  "rewrite": "We'll meet at the school gym at 4.",
+  "expect": "pass",
+  "why": "content-word self-correction (round 3 held-out)"
+ },
+ {
+  "id": "ho_presenter_condense",
+  "original": "So, um, I just wanted to quickly say that the new parking rules start next week for all staff.",
+  "rewrite": "The new parking rules start next week for all staff.",
+  "expect": "pass",
+  "why": "presenter condensing (round 3 held-out)"
+ },
+ {
+  "id": "ho_front_time",
+  "original": "Please send the final report to the whole team before Friday.",
+  "rewrite": "Before Friday, please send the final report to the whole team.",
+  "expect": "pass",
+  "why": "time phrase fronted (round 3 held-out)"
+ },
+ {
+  "id": "ho_list_kept",
+  "original": "Bring your laptop, uh, your charger and, um, a notebook.",
+  "rewrite": "Bring your laptop, your charger and a notebook.",
+  "expect": "pass",
+  "why": "list kept (round 3 held-out)"
+ },
+ {
+  "id": "ho_list_swap_order",
+  "original": "Bring your laptop, your charger and a notebook.",
+  "rewrite": "Bring a notebook, your laptop and your charger.",
+  "expect": "pass",
+  "why": "list order is not meaning (round 3 held-out)"
+ },
+ {
+  "id": "ho_grammar",
+  "original": "the results was, uh, really good and the client were happy with them",
+  "rewrite": "The results were really good, and the client was happy with them.",
+  "expect": "pass",
+  "why": "grammar fix (round 3 held-out)"
+ },
+ {
+  "id": "ho_false_start_content",
+  "original": "The project, the main project is due, um, on the third of May.",
+  "rewrite": "The main project is due on the third of May.",
+  "expect": "pass",
+  "why": "false start repeat (round 3 held-out)"
+ },
+ {
+  "id": "ho_and_rephrase",
+  "original": "you know, the workshop is free and, like, open to everyone",
+  "rewrite": "The workshop is free and open to everyone.",
+  "expect": "pass",
+  "why": "and + existing word (round 3 held-out)"
+ },
+ {
+  "id": "ho_list_added",
+  "original": "Bring your laptop and a notebook.",
+  "rewrite": "Bring your laptop, a notebook and your passport.",
+  "expect": "fail",
+  "why": "added item (round 3 held-out)"
+ },
+ {
+  "id": "ho_role_swap",
+  "original": "The marketing team will review the design team's proposal.",
+  "rewrite": "The design team will review the marketing team's proposal.",
+  "expect": "fail",
+  "why": "who reviews whom swapped (round 3 held-out)"
+ },
+ {
+  "id": "ho_drop_location",
+  "original": "The exam is in the chemistry building, room on the second floor.",
+  "rewrite": "The exam is on the second floor.",
+  "expect": "fail",
+  "why": "dropped building (round 3 held-out)"
+ },
+ {
+  "id": "ho_swap_object",
+  "original": "The vegetarian option is pasta and the main option is chicken.",
+  "rewrite": "The vegetarian option is chicken and the main option is pasta.",
+  "expect": "fail",
+  "why": "swapped dishes (round 3 held-out)"
+ },
+ {
+  "id": "ho_drop_condition",
+  "original": "You can leave early if your lab report is finished.",
+  "rewrite": "You can leave early.",
+  "expect": "fail",
+  "why": "dropped condition (round 3 held-out)"
  }
 ]
