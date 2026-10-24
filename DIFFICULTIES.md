@@ -13,3 +13,10 @@ Problems we hit, what we tried, and what we did. Each terminal appends only unde
 
 ## Terminal 3 — frontend / docs
 
+- **Browser recording vs. playback gestures** — 2026-10-23. Chained `<audio>` playback after an async speak request can be blocked by autoplay rules. Fix: one shared `<audio>` element is primed with a silent clip inside the Approve click, then its `src` is swapped per chunk.
+- **Playback state overwrote recording state** — a chunk finishing after the user pressed Record set the UI back to "playing". Fix: cancel chained playback (generation counter) at the start of `startRecording`, before the microphone opens. Found with a headless-Chrome run and a fake microphone.
+- **`display:flex` beat the `hidden` attribute** — the empty error box and override checkbox were visible on a clean page. Fix: `[hidden] { display: none !important }`. Found from a screenshot, not from tests.
+- **Backend edit reasons are codes** (`restructure`, `self_correction`), not sentences — mapped to plain English in the UI rather than changing the contract.
+- **No real demo clip** — `fixtures/backup_demo.m4a` is a placeholder tone, which real ASR would reject as no speech. The "Use demo clip" button uses `frontend/demo-clip.m4a`, generated with macOS `say` reading the canonical announcement (a synthetic voice, not a person). Replace it with a real recording of the demo speaker before finals.
+- **Twinly offline UX ambiguity** — docs/md/10 says Record is blocked when Twinly is offline, docs/md/11 says text-only mode. We kept Record enabled and switched only speaking off, so the cleaned-up text is still useful.
+
