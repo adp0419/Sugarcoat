@@ -134,12 +134,14 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
     job.notes = [n for n in job.notes if not n.startswith("ladder:")]
     violations: list[str] | None = None
     guard_unavailable = False
+    api_down = False  # rewrite call itself failed (auth/network): a stricter retry cannot help
 
     async def attempt(rung: str, label: str) -> bool:
-        nonlocal violations, guard_unavailable
+        nonlocal violations, guard_unavailable, api_down
         ok, res = await stage(st, "rewrite", lambda: _rewrite(job.verbatim, mode, job.decisions, violations),
                               model=_models()["rewrite"], label=label, preview=lambda r: r[0].rewrite)
         if not ok:
+            api_down = not isinstance(res, ValueError)  # ValueError covers bad JSON / sanity rejects
             violations = [f"previous attempt failed: {res}"] if rung == "full" else violations
             return False
         result, model_used = res
@@ -173,9 +175,10 @@ async def run_ladder(st: JobState, mode: Mode) -> None:
 
     if await attempt("full", ""):
         return
-    await _fallback(st, "rewrite", "Rewrite rejected - retrying with a stricter prompt")
-    if await attempt("retry", "retry (stricter)"):
-        return
+    if not api_down:
+        await _fallback(st, "rewrite", "Rewrite rejected - retrying with a stricter prompt")
+        if await attempt("retry", "retry (stricter)"):
+            return
 
     await _fallback(st, "rewrite", "Falling back to minimal filler removal (no AI)")
     ok, res = await stage(st, "rewrite", lambda: _async(rw.minimal(job.verbatim)), model="deterministic",
