@@ -22,6 +22,25 @@ _pool = ThreadPoolExecutor(max_workers=1)  # one worker: model memory
 SILENCE_DB = -50.0
 
 
+PAUSE_SPLIT_S = 0.7
+
+
+def split_sentences(verbatim: str, words: list[Word] | None = None) -> list[str]:
+    """Split on [.?!], then on pauses > 0.7 s between word timestamps (docs/md/03)."""
+    if words and " ".join(w.w for w in words).split() == verbatim.split():
+        out, cur = [], []
+        for i, w in enumerate(words):
+            cur.append(w.w)
+            gap = words[i + 1].start - w.end if i + 1 < len(words) else 0.0
+            if re.search(r"[.?!][\"')\]]*$", w.w) or gap > PAUSE_SPLIT_S:
+                out.append(" ".join(cur))
+                cur = []
+        if cur:
+            out.append(" ".join(cur))
+        return [x for x in out if x.strip()]
+    return [x.strip() for x in re.split(r"(?<=[.?!])\s+", verbatim) if x.strip()]
+
+
 def loaded() -> bool:
     return _model is not None
 
