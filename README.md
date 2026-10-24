@@ -1,4 +1,4 @@
-# VoiceFlow Lite
+# Sugarcoat Lite
 
 Hold to record, release to clean your transcript, then hear it in your existing Twinly voice clone. The **Voice Output** player keeps the latest generated clip available for replay, pause, seeking, and volume adjustment without another provider request.
 
@@ -9,7 +9,7 @@ One Node.js server, vanilla JavaScript, no runtime dependencies, framework, data
 Requires Node.js 22+; tested on Node 24.8.
 
 ```sh
-cd /Users/rohit/Projects/VoiceFlowLite
+cd /Users/rohit/Projects/SugarcoatLite
 npm start
 ```
 
@@ -144,7 +144,7 @@ The server flushes responses and disables transform/proxy buffering hints; rever
 ## Files
 
 ```text
-VoiceFlowLite/
+SugarcoatLite/
 ├── .env.example, .gitignore, package.json, render.yaml, README.md
 ├── server.mjs
 ├── lib/

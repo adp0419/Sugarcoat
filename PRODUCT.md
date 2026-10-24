@@ -1,4 +1,4 @@
-# VoiceFlow Lite
+# Sugarcoat Lite
 
 <!-- impeccable:product-schema 1 -->
 
@@ -28,7 +28,7 @@ A single Node.js server serves vanilla HTML, CSS, and JavaScript. There is no fr
 
 ## Brand Commitments
 
-Retain the VoiceFlow Lite name and meaningful existing content. The user requests a dark, technical aesthetic inspired by Vercel: near-black surfaces, restrained typography, fine borders, high-contrast actions, and one unified ruled workspace. No decorative gradients, glass effects, excessive shadows, or unnecessary motion.
+Retain the Sugarcoat Lite name and meaningful existing content. The user requests a dark, technical aesthetic inspired by Vercel: near-black surfaces, restrained typography, fine borders, high-contrast actions, and one unified ruled workspace. No decorative gradients, glass effects, excessive shadows, or unnecessary motion.
 
 ## Product Principles
 

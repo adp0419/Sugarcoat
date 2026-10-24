@@ -1,5 +1,5 @@
 ---
-name: VoiceFlow Lite
+name: Sugarcoat Lite
 description: A restrained dark workspace for recording, cleaned words, and voice replay.
 colors:
   background: "#0a0a0a"
@@ -112,7 +112,7 @@ components:
     padding: "16px 24px"
 ---
 
-# Design System: VoiceFlow Lite
+# Design System: Sugarcoat Lite
 
 ## Overview
 

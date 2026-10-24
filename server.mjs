@@ -180,7 +180,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const config = readConfig();
   const server = await createApp(config);
   server.listen(config.port, config.host, () => {
-    console.log(`VoiceFlow Lite · ${config.mode} · TTS ${config.ttsProvider}\nLocal: http://${config.host}:${server.address().port}`);
+    console.log(`Sugarcoat Lite · ${config.mode} · TTS ${config.ttsProvider}\nLocal: http://${config.host}:${server.address().port}`);
   });
   for (const event of ['SIGINT', 'SIGTERM']) process.on(event, () => {
     server.close(); server.closeAllConnections();

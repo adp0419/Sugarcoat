@@ -249,7 +249,7 @@ async function processRecording(run, mimeType) {
     await run.player.finish();
     if (isCurrent(run)) {
       run.browser.finishedMs = performance.now() - run.endAt; renderTimings(run);
-      console.info('VoiceFlow timing (ms)', { browser: run.browser, server: run.server, vadSilenceMs: run.silenceMs || 0 });
+      console.info('Sugarcoat timing (ms)', { browser: run.browser, server: run.server, vadSilenceMs: run.silenceMs || 0 });
       current = null; cancel.disabled = true; status($('transcript').value ? 'Ready' : 'No speech detected');
     }
   } catch (error) {

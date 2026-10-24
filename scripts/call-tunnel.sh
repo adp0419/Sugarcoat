@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the VoiceFlow server and a cloudflared quick tunnel, then print the two join links.
+# Start the Sugarcoat server and a cloudflared quick tunnel, then print the two join links.
 # Env passes through (APP_MODE, TTS_PROVIDER, keys...). Reads .env via node --env-file-if-exists.
 # CALL_TOKEN is generated if unset. Only the child processes started here are stopped on exit.
 set -u

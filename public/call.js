@@ -265,14 +265,14 @@ async function openStream() {
 function showLogin(message = '') {
   $('app').hidden = true; $('login').hidden = false;
   $('loginError').textContent = message; $('loginError').hidden = !message;
-  document.title = 'Sign in · VoiceFlow Comms';
+  document.title = 'Sign in · Sugarcoat Comms';
 }
 function enterApp(who) {
   me = who; signedIn = true; everOpened = false; errorsInRow = 0; connected = false;
   ssSet('vf-comms-user', me);
   const peer = peerOf(me);
   $('login').hidden = true; $('app').hidden = false;
-  document.title = `@${NAMES[peer]} · VoiceFlow Comms`;
+  document.title = `@${NAMES[peer]} · Sugarcoat Comms`;
   $('meName').textContent = NAMES[me]; setAvatar($('meAvatar'), me);
   $('peerNameRail').textContent = NAMES[peer]; setAvatar($('peerAvatar'), peer);
   $('dmTitle').textContent = NAMES[peer]; $('emptyTitle').textContent = `This is the start of your conversation with ${NAMES[peer]}.`;
