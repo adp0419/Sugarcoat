@@ -6,14 +6,19 @@ const MAX_SECONDS = 45;
 const STAGE_MAP = { convert: "convert", asr: "hear", decide: "decide", rewrite: "edit", guard: "verify" };
 const STAGE_LABEL = { convert: "Converting audio", hear: "Listening to what you said", decide: "Deciding how to tidy it", edit: "Editing", verify: "Checking the meaning", ready: "Ready" };
 
+const params = new URLSearchParams(location.search);
 const app = {
-  mock: new URLSearchParams(location.search).get("mock") === "1",
+  mock: params.get("mock") === "1",
+  hang: params.get("hang") === "1" ? "rewrite" : params.get("hang"), // test toggle: offline mock never finishes this stage
   health: null,
   job: null,
+  jobId: null,         // id of the job being processed (app.job is only set once it is ready)
   blob: null,          // last recording, kept in memory only (for "Play original")
   recorder: null, stream: null, chunks: [], recStart: 0, timerId: 0, audioCtx: null, raf: 0,
-  es: null, pollId: 0,
+  es: null, pollId: 0, runId: 0,
   twinlyOnline: true,
+  blockedJobs: new Set(), // jobs that got job_unverified: never resend (docs/md/CLAUDE.md rule 6)
+  wd: null,
 };
 
 // ---------- small helpers ----------
@@ -35,20 +40,30 @@ function setState(s) { document.body.dataset.state = s; }
 function setStatus(text) { $("status").textContent = text; }
 function showBanner(text) { const b = $("banner"); b.textContent = text; b.hidden = !text; }
 
-function showError(message, hint, state = "error") {
+// near = "speak" shows the box under the Approve button the user just pressed; otherwise above the results.
+function showError(message, hint, state = "error", steps = [], near = "home") {
   setState(state);
+  $(near === "speak" ? "error-speak" : "error-home").after($("error"));
   $("error-msg").textContent = message;
   $("error-hint").textContent = hint || "";
+  $("error-steps").replaceChildren(...steps.map((s) => el("li", { text: s })));
+  $("error-steps").hidden = !steps.length;
   $("error").hidden = false;
-  setStatus("Something went wrong. " + (hint || ""));
+  $("error").scrollIntoView({ block: "nearest" });
+  setStatus(message + " " + (hint || ""));
 }
 function clearError() { $("error").hidden = true; }
 
-// Uniform backend errors: {error:{code,message,hint}}
-async function api(path, opts) {
+// Uniform backend errors: {error:{code,message,hint}}. Every request has a deadline so nothing waits forever.
+async function api(path, opts = {}, timeoutMs = 25000) {
   let res;
-  try { res = await fetch(path, opts); }
-  catch (e) { throw { code: "network", message: "Can't reach the VoiceFlow server.", hint: "Is it running? Try `make run` and reload." }; }
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try { res = await fetch(path, { ...opts, signal: ctl.signal }); }
+  catch (e) {
+    if (e && e.name === "AbortError") throw { code: "timeout", message: "The server didn't answer within " + Math.round(timeoutMs / 1000) + " seconds.", hint: "It may be busy or stuck. Try again." };
+    throw { code: "network", message: "Can't reach the VoiceFlow server.", hint: "Is it running? Try `make run` and reload." };
+  } finally { clearTimeout(timer); }
   let body = null;
   try { body = await res.json(); } catch { /* empty or non-JSON */ }
   if (!res.ok) {
@@ -219,7 +234,9 @@ function resetStages() {
 }
 function resetResult() {
   closeJobStreams();
-  app.job = null;
+  stopWatchdog();
+  app.runId++;
+  app.job = null; app.jobId = null;
   $("result").hidden = true;
   $("output").hidden = true;
   $("override").checked = false;
@@ -237,14 +254,21 @@ function currentMode() { return document.querySelector('input[name="mode"]:check
 function setMode(m) { const r = document.querySelector('input[name="mode"][value="' + m + '"]'); if (r) r.checked = true; }
 
 async function submitAudio(blob) {
+  closeJobStreams();
+  app.runId++;
+  app.job = null; app.jobId = null;
   app.blob = blob;
   $("original").disabled = false;
+  $("result").hidden = true;
+  clearError();
   resetStages();
   setState("uploading");
   setStatus("Uploading your recording…");
   $("timer").textContent = "0:00 / " + fmtTime(MAX_SECONDS);
+  startWatchdog();
+  const run = app.runId;
   try {
-    if (app.mock) return await runMock(blob);
+    if (app.mock) return await runMock(run);
     const fd = new FormData();
     const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("wav") ? "wav" : "webm";
     fd.append("audio", blob, "recording." + ext);
@@ -252,8 +276,11 @@ async function submitAudio(blob) {
     const terms = $("terms").value.trim();
     if (terms) fd.append("protected_terms", terms);
     const { job_id } = await api("/api/process", { method: "POST", body: fd });
+    if (run !== app.runId) return;
+    app.jobId = job_id;
+    noteProgress();
     watchJob(job_id);
-  } catch (e) { showError(e.message || "Upload failed.", e.hint); }
+  } catch (e) { if (run === app.runId) { stopWatchdog(); showError(e.message || "Upload failed.", e.hint); } }
 }
 
 // SSE first; if the stream errors, poll GET /api/jobs/{id} every 800 ms.
@@ -265,14 +292,15 @@ function watchJob(id) {
   try {
     const es = new EventSource("/api/jobs/" + encodeURIComponent(id) + "/events");
     app.es = es;
-    es.addEventListener("stage", (m) => handleStage(JSON.parse(m.data)));
+    es.addEventListener("stage", (m) => { noteProgress(); handleStage(JSON.parse(m.data)); });
     es.addEventListener("result", (m) => { done(); handleJob(JSON.parse(m.data)); });
     es.addEventListener("error", (m) => {
       if (finished) return;
       if (m && m.data) { // a real `error` event from the server
-        done();
-        let msg = "The job failed."; try { msg = JSON.parse(m.data).message || msg; } catch {}
-        showError(msg, "Try again, or press \"Use demo clip\".");
+        done(); stopWatchdog();
+        let body = {}; try { body = JSON.parse(m.data); } catch {}
+        const e = body.error || body;
+        showError(e.message || "The job failed.", e.hint || "Try again, or press \"Use demo clip\".");
       } else { es.close(); app.es = null; startPolling(id); } // connection problem
     });
   } catch { startPolling(id); }
@@ -280,60 +308,199 @@ function watchJob(id) {
 
 function startPolling(id) {
   if (app.pollId) return;
+  let sig = "";
   app.pollId = setInterval(async () => {
     try {
-      const job = await api("/api/jobs/" + encodeURIComponent(id));
+      const job = await api("/api/jobs/" + encodeURIComponent(id), {}, 5000);
+      if (id !== app.jobId) return;
+      // Only a change counts as progress: a stuck job answers polls with the same snapshot forever.
+      const now = job.status + ":" + (job.trace || []).length;
+      if (now !== sig) { sig = now; noteProgress(); }
       applyTrace(job.trace || []);
       if (job.status === "ready" || job.status === "failed") { closeJobStreams(); handleJob(job); }
-    } catch (e) { closeJobStreams(); showError(e.message, e.hint); }
+    } catch (e) {
+      if (e.code === "timeout" || e.code === "network") return; // the watchdog reports silence
+      closeJobStreams(); stopWatchdog(); showError(e.message, e.hint);
+    }
   }, 800);
 }
 
 // Polling has no stage events, so derive the timeline from the job's trace.
 function applyTrace(trace) {
-  for (const t of trace) handleStage({ stage: t.stage, status: t.ok ? "done" : "error", ms: t.ms });
+  for (const t of trace) handleStage({ stage: t.stage, status: t.ok ? "done" : "error", ms: t.ms, preview: t.error || "" }, true);
   const last = trace.length ? trace[trace.length - 1].stage : null;
   const order = ["convert", "asr", "decide", "rewrite", "guard"];
   const next = order[order.indexOf(last) + 1];
-  if (next) handleStage({ stage: next, status: "start" });
+  if (next) handleStage({ stage: next, status: "start" }, true);
 }
 
-function handleStage(ev) {
+function handleStage(ev, quiet) {
   const name = STAGE_MAP[ev.stage];
   if (!name) return;
   const li = document.querySelector('#stages li[data-stage="' + name + '"]');
   if (!li) return;
-  if (li.dataset.status === "done" && ev.status === "start") return;
+  if (quiet && li.dataset.status === ev.status) return;
+  if (li.dataset.status === "done" && ev.status === "start" && quiet) return;
   li.dataset.status = ev.status;
   if (ev.ms != null && ev.status !== "start") li.querySelector(".s-ms").textContent = fmtMs(ev.ms);
-  const words = { start: STAGE_LABEL[name] + "…", done: STAGE_LABEL[name] + ": done" + (ev.ms != null ? " in " + fmtMs(ev.ms) : ""), error: STAGE_LABEL[name] + " had a problem", fallback: STAGE_LABEL[name] + ": using a safer fallback" };
+  if (ev.status === "start") wdStage(name);
+  else if (app.wd && app.wd.stage === name) app.wd.stage = null;
+  const words = {
+    start: STAGE_LABEL[name] + "…",
+    done: STAGE_LABEL[name] + ": done" + (ev.ms != null ? " in " + fmtMs(ev.ms) : ""),
+    error: explainFailure(ev.stage, ev.preview) + " Trying a safer fallback…",
+    fallback: STAGE_LABEL[name] + ": " + (ev.preview || "using a safer fallback") + ".",
+  };
   setStatus(words[ev.status] || "");
   if (document.body.dataset.state === "uploading") setState("processing");
 }
 
 function handleJob(job) {
-  if (job.status === "failed") { showError("We couldn't process that recording.", "Try speaking a little closer to the microphone, or press \"Use demo clip\"."); return; }
+  stopWatchdog();
+  if (job.status === "failed") {
+    const e = job.error || {};
+    showError(e.message || "We couldn't process that recording.", e.hint || "Try speaking a little closer to the microphone, or press \"Use demo clip\".");
+    return;
+  }
   app.job = job;
   const ready = document.querySelector('#stages li[data-stage="ready"]');
   ready.dataset.status = "done";
-  ready.querySelector(".s-ms").textContent = job.timings ? fmtMs(job.timings.total_ms) : "";
+  ready.querySelector(".s-ms").textContent = job.timings && job.timings.total_ms ? fmtMs(job.timings.total_ms) : "";
   document.querySelectorAll("#stages li").forEach((li) => { if (li.dataset.status === "idle" || li.dataset.status === "start") li.dataset.status = "done"; });
-  setMode(job.mode_used);
+  if (job.mode_used) setMode(job.mode_used);
   renderJob(job, true);
 }
 
+// ---------- client-side watchdog ----------
+// The UI never trusts the backend to finish: it warns after 15 s of silence or when a stage runs past
+// 2x its budget (docs/md/03), offers a way out, and gives up at 60 s.
+const STALL_MS = 15000, HARD_STOP_MS = 60000;
+const BUDGET_MS = { upload: 5000, convert: 500, hear: 6000, decide: 3000, edit: 5000, verify: 3000 };
+const WHO = { upload: "The upload", convert: "Converting the audio", hear: "Speech recognition", decide: "The analysis service (OpenAI Decisions)", edit: "The AI editor (Gemma 4)", verify: "The meaning check" };
+const SLOW_TEXT = {
+  upload: "Uploading is taking longer than usual. The server may be busy.",
+  convert: "Converting the audio is taking longer than usual.",
+  hear: "Speech recognition is taking longer than usual. The first run after the server starts can be slow while the model loads.",
+  decide: "The analysis service (OpenAI Decisions) is slow to answer.",
+  edit: "The AI editor (Gemma 4) is taking longer than usual. It normally answers in under 10 seconds.",
+  verify: "The meaning check is slow to answer.",
+};
+
+function startWatchdog() {
+  stopWatchdog();
+  const now = Date.now();
+  app.wd = { start: now, last: now, stage: "upload", stageStart: now, key: "", timer: setInterval(wdTick, 500) };
+}
+function stopWatchdog() {
+  if (app.wd) clearInterval(app.wd.timer);
+  app.wd = null;
+  $("watch").hidden = true;
+}
+function noteProgress() { if (app.wd) app.wd.last = Date.now(); }
+function wdStage(name) { if (app.wd && app.wd.stage !== name) { app.wd.stage = name; app.wd.stageStart = Date.now(); } }
+
+function wdTick() {
+  const wd = app.wd; if (!wd) return;
+  const now = Date.now(), total = now - wd.start, quiet = now - wd.last;
+  const stageMs = wd.stage ? now - wd.stageStart : 0;
+  const li = wd.stage && document.querySelector('#stages li[data-stage="' + wd.stage + '"]');
+  if (li && li.dataset.status === "start") li.querySelector(".s-ms").textContent = Math.floor(stageMs / 1000) + " s";
+  if (total >= HARD_STOP_MS) return hardStop();
+  const stalled = quiet >= STALL_MS;
+  const slow = wd.stage && stageMs > 2 * BUDGET_MS[wd.stage];
+  if (!stalled && !slow) { $("watch").hidden = true; wd.key = ""; return; }
+  const key = (stalled ? "stall:" : "slow:") + wd.stage;
+  if (key !== wd.key) { // only re-announce when the situation changes, not every tick
+    wd.key = key;
+    const what = SLOW_TEXT[wd.stage] || "This is taking longer than usual.";
+    $("watch-msg").textContent = (stalled ? "No update from the server for " + Math.round(quiet / 1000) + " seconds. " : "") + what +
+      " You can keep waiting, use your words without the AI edit, or try again.";
+    $("watch").hidden = false;
+    $("wd-plain").disabled = false;
+  }
+  $("watch-time").textContent = "Waiting " + Math.floor(total / 1000) + " s so far. We'll stop waiting at " + HARD_STOP_MS / 1000 + " s.";
+}
+
+function hardStop() {
+  const stage = app.wd && app.wd.stage;
+  closeJobStreams();
+  stopWatchdog();
+  app.runId++; // ignore anything the stuck job sends later
+  const li = stage && document.querySelector('#stages li[data-stage="' + stage + '"]');
+  if (li) li.dataset.status = "error";
+  setState("error");
+  $("watch-msg").textContent = "We stopped waiting after 60 seconds: " + (WHO[stage] || "the server") + " didn't finish. " +
+    "Use your words without the AI edit, or try again.";
+  $("watch-time").textContent = "";
+  $("watch").hidden = false;
+  setStatus("Stopped after 60 seconds.");
+}
+
+// Way out #1: take the transcript we already have and only strip filler sounds, locally.
+const STRIP_FILLERS = /(^|[\s,])(?:um+|uh+|erm|er|ah+|hmm+)(?=[\s,.!?]|$)[,]?/gi;
+function stripFillers(text) {
+  let t = text.replace(STRIP_FILLERS, "$1");
+  t = t.replace(/\b(\w+)(\s+\1\b)+/gi, "$1");           // "and and" -> "and"
+  t = t.replace(/\s+([,.!?])/g, "$1").replace(/,\s*,/g, ",").replace(/\s{2,}/g, " ").trim();
+  t = t.replace(/^[,.\s]+/, "");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+async function usePlainText() {
+  const run = ++app.runId;
+  closeJobStreams();
+  if (app.wd) clearInterval(app.wd.timer);
+  $("wd-plain").disabled = true;
+  $("watch-msg").textContent = "Getting the transcript we already have…";
+  let snap = null;
+  try {
+    snap = app.mock ? await (await fetch("mock-job.json")).json()
+      : app.jobId ? await api("/api/jobs/" + encodeURIComponent(app.jobId), {}, 5000) : null;
+  } catch { snap = null; }
+  if (run !== app.runId) return;
+  if (!snap || !(snap.verbatim || "").trim()) {
+    stopWatchdog();
+    setState("error");
+    $("watch").hidden = false;
+    $("watch-msg").textContent = "There is no transcript yet: speech recognition didn't finish, so there is no text to use. Press Try again, or record again.";
+    $("watch-time").textContent = "";
+    return;
+  }
+  stopWatchdog();
+  const text = stripFillers(snap.verbatim);
+  const job = Object.assign({ decisions: null, trace: [], edits: [] }, snap, {
+    id: snap.id || app.jobId, status: "ready", rung: "local", rewrite: text, guard: null,
+    edits: [{ from: "um uh er ah hmm", to: "", reason: "filler" }],
+  });
+  ["edit", "verify"].forEach((s) => { const li = document.querySelector('#stages li[data-stage="' + s + '"]'); if (li.dataset.status !== "done") li.dataset.status = "fallback"; });
+  handleJob(job);
+  checkEdited(); // run the meaning check on the plain text (guard only, no AI edit)
+}
+
+// Way out #2: send the same recording again.
+function retryJob() {
+  if (!app.blob) { stopWatchdog(); setState("idle"); setStatus("Record again, or press Use demo clip."); $("record").focus(); return; }
+  submitAudio(app.blob);
+}
+
 // ---------- offline demo pipeline (no server) ----------
-async function runMock(blob) {
+async function runMock(run) {
   setState("processing");
   const base = await (await fetch("mock-job.json")).json();
   const steps = [["convert", 140], ["asr", 900], ["decide", 600], ["rewrite", 800], ["guard", 500]];
   for (const [stage, ms] of steps) {
+    if (run !== app.runId) return;
+    noteProgress();
     handleStage({ stage, status: "start" });
+    if (app.hang === stage || app.hang === STAGE_MAP[stage]) return; // ?hang=<stage>: simulate a stuck backend
     await sleep(ms);
+    if (run !== app.runId) return;
+    noteProgress();
     handleStage({ stage, status: "done", ms });
   }
   const mode = currentMode();
   base.mode_used = mode === "auto" ? base.decisions.recommended_mode : mode;
+  base.protected_terms = $("terms").value.split(",").map((t) => t.trim()).filter(Boolean);
   handleJob(base);
 }
 function mockGuard(text) {
@@ -417,6 +584,7 @@ function renderDiff() {
     h.append(el("span", { class: "chip", role: "note", text: reason }), " ");
     box.append(h);
   }
+  renderNames();
 }
 
 const PRED_LABEL = {
@@ -475,26 +643,145 @@ function renderGuard(g) {
     : mp != null ? "AI second opinion: " + pct(mp) + " sure the meaning is preserved." : "";
 }
 
+// ---------- plain-English explanations ----------
+const SERVICE = {
+  convert: "Converting the audio", asr: "Speech recognition", decide: "The analysis service (OpenAI Decisions)",
+  rewrite: "The AI editor (Gemma 4)", guard: "The meaning check", speak: "Twinly",
+};
+// Raw errors like "ClientError: 401 UNAUTHENTICATED" -> a short reason. Order matters: most specific first.
+const ERROR_REASONS = [
+  [/\b401\b|\b403\b|unauthen|unauthori|api.?key|permission|access_token/i, "rejected our API key"],
+  [/\b429\b|rate.?limit|quota|credit|resource_exhausted|insufficient/i, "is out of credits or rate-limited"],
+  [/timeout|timed out|deadline|took too long|did not answer|didn't answer/i, "didn't answer in time"],
+  [/not set|not configured|missing key/i, "isn't configured (no API key)"],
+  [/connect|network|unreachable|dns|refused/i, "couldn't be reached"],
+  [/json|valueerror|parse|sanity|malformed/i, "gave an answer we couldn't use"],
+  [/\b5\d\d\b|internal|unavailable|server error|overloaded/i, "had an internal error"],
+];
+function errorReason(raw) {
+  const hit = ERROR_REASONS.find(([re]) => re.test(raw || ""));
+  return hit ? hit[1] : "reported an error";
+}
+function explainFailure(stage, raw) { return (SERVICE[stage] || "A step") + " " + errorReason(raw) + "."; }
+
+// Why the ladder landed where it did, from the trace the backend already returns.
+function fallbackCause(job) {
+  const t = job.trace || [];
+  const failedEdit = t.find((x) => x.stage === "rewrite" && !x.ok && x.model !== "deterministic");
+  if (failedEdit) return "The AI editor (Gemma 4) " + errorReason(failedEdit.error); // raw error stays in the trace details
+  const blocked = t.find((x) => x.stage === "guard" && x.ok && /^FAIL/i.test(x.preview || ""));
+  if (blocked) return "The AI's edit changed your meaning (" + blocked.preview.replace(/^FAIL:\s*/i, "").replace(/\s*\(verifier \w+\)$/, "") + ")";
+  return "The AI's edit didn't pass the meaning check";
+}
+function rungExplanation(job) {
+  const cause = fallbackCause(job);
+  switch (job.rung) {
+    case "retry": return cause + ", so we asked the AI editor again with stricter instructions. You are seeing that second attempt; it passed the meaning check.";
+    case "minimal": return cause + ", so we only removed filler words (um, uh) and repeated words. Nothing was reworded, and no names, numbers, or dates were changed.";
+    case "original": return cause + ", so nothing was changed: the text below is exactly what we heard. You can still edit it yourself before approving.";
+    case "local": return "You chose to skip the AI edit. We removed filler sounds (um, uh) and repeated words in your browser; nothing else was changed, so self-corrections like \u201cFriday, no wait, Monday\u201d stay as you said them. Edit the text if you like; the meaning check runs before you can speak it.";
+    default: return "";
+  }
+}
+function renderRung(job) {
+  const text = rungExplanation(job);
+  $("rung").hidden = !text;
+  $("rung-text").textContent = text;
+}
+
+// Backend notes (job.notes) -> sentences a user understands. Unknown notes pass through.
+const NOTE_TEXT = [
+  [/verifier offline/i, "The AI second opinion was unavailable, so only the fixed meaning checks ran."],
+  [/decisions api (unavailable|disabled)/i, "The analysis service (OpenAI Decisions) was unavailable, so we used Natural mode and the fixed meaning checks only."],
+  [/guard not available/i, "The meaning check wasn't available, so this text is NOT verified. Read it carefully before approving."],
+  [/no changes made/i, null], // covered by the rung box
+];
+function renderNotes(notes) {
+  const out = [];
+  for (const n of notes || []) {
+    const hit = NOTE_TEXT.find(([re]) => re.test(n));
+    const text = hit ? hit[1] : n.replace(/^ladder:\s*/i, "");
+    if (text && !out.includes(text)) out.push(text);
+  }
+  $("notes").replaceChildren(...out.map((t) => el("li", { text: t })));
+  $("notes").hidden = !out.length;
+}
+
 function renderTrace(trace) {
   const tb = $("trace"); tb.replaceChildren();
   for (const t of trace || []) {
+    const note = el("td");
+    if (t.ok) note.textContent = t.preview || "";
+    else {
+      note.append(explainFailure(t.stage, t.error) + " ");
+      if (t.error) note.append(el("details", {}, el("summary", { text: "Technical detail" }), el("code", { text: t.error })));
+    }
     tb.append(el("tr", {},
-      el("td", { text: t.stage + (t.ok ? "" : " (failed)") }),
+      el("td", { text: t.stage + (t.ok ? "" : " ✗ failed") }),
       el("td", { text: fmtMs(t.ms || 0) }),
       el("td", { text: t.model || "-" }),
-      el("td", { text: t.error || t.preview || "" })));
+      note));
   }
 }
 
-const RUNG_TEXT = {
-  retry: "Safe fallback: the first edit didn't pass, so a second attempt is shown.",
-  minimal: "Safe fallback: showing the lightest edit (fillers only) because bigger edits didn't pass the meaning check.",
-  original: "Safe fallback: showing your original words because no edit passed the meaning check.",
-};
-function renderRung(rung) {
-  const b = $("rung");
-  b.hidden = !RUNG_TEXT[rung];
-  b.textContent = RUNG_TEXT[rung] || "";
+// ---------- names check (protected terms) ----------
+const plain = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, " ").replace(/\s+/g, " ").trim();
+function hasPhrase(text, term) { return (" " + plain(text) + " ").includes(" " + plain(term) + " "); }
+function lev(a, b) {
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = d[0]; d[0] = i;
+    for (let j = 1; j <= b.length; j++) { const tmp = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = tmp; }
+  }
+  return d[b.length];
+}
+// Closest run of words in `text` to `term` (e.g. "Ariane Patel" for "Aryan Patel"), or null.
+function closestPhrase(text, term) {
+  const words = text.split(/\s+/).filter(Boolean), want = plain(term), k = want.split(" ").length;
+  let best = null, bestScore = 0;
+  for (let size = Math.max(1, k - 1); size <= k + 1; size++) {
+    for (let i = 0; i + size <= words.length; i++) {
+      const raw = words.slice(i, i + size).join(" ").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+      const cand = plain(raw); if (!cand) continue;
+      const score = 1 - lev(cand, want) / Math.max(cand.length, want.length);
+      if (score > bestScore) { bestScore = score; best = raw; }
+    }
+  }
+  return bestScore >= 0.6 ? best : null;
+}
+function termsFor(job) {
+  const fromJob = (job && job.protected_terms) || [];
+  return fromJob.length ? fromJob : $("terms").value.split(",").map((t) => t.trim()).filter(Boolean);
+}
+function renderNames() {
+  const job = app.job, list = $("names-list"); list.replaceChildren();
+  const terms = job ? termsFor(job) : [];
+  $("names").hidden = !terms.length;
+  const final = $("final-text").value;
+  for (const term of terms) {
+    const heard = hasPhrase(job.verbatim || "", term), kept = hasPhrase(final, term);
+    const near = heard ? null : closestPhrase(job.verbatim || "", term);
+    let s = "ok", msg;
+    if (heard && kept) msg = "Heard correctly and kept in the final text.";
+    else if (heard) { s = "warn"; msg = "Heard correctly, but it is missing from the final text. Check the edit before approving."; }
+    else if (kept) msg = near ? "Speech recognition heard “" + near + "”; the final text uses “" + term + "”." : "Not heard in the recording, but the final text includes it.";
+    else if (near) { s = "warn"; msg = "Speech recognition heard “" + near + "” instead."; }
+    else { s = "none"; msg = "Not found in what we heard."; }
+    const li = el("li", { "data-s": s }, el("span", { class: "term", text: term }), el("span", { text: msg }));
+    if (!heard && !kept && near && hasPhrase(final, near)) {
+      const b = el("button", { type: "button", class: "secondary", text: "Use “" + term + "” in the final text" });
+      b.addEventListener("click", () => replaceInFinal(near, term));
+      li.append(b);
+    }
+    list.append(li);
+  }
+}
+function replaceInFinal(from, to) {
+  const re = new RegExp(from.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "gi");
+  const ta = $("final-text");
+  ta.value = ta.value.replace(re, to);
+  ta.dispatchEvent(new Event("input")); // re-diff and re-run the meaning check
+  ta.focus();
 }
 
 function renderJob(job, fresh) {
@@ -505,7 +792,8 @@ function renderJob(job, fresh) {
   renderDecisions(job.decisions);
   renderGuard(job.guard);
   renderTrace(job.trace);
-  renderRung(job.rung);
+  renderRung(job);
+  renderNotes(job.notes);
   $("override").checked = false;
   const ok = !job.guard || job.guard.pass;
   $("override-wrap").hidden = ok;
@@ -524,12 +812,15 @@ function syncSpeakButton() {
   const st = document.body.dataset.state;
   const busy = st === "speaking" || app.checking;
   const guardOk = !!app.job && (!app.job.guard || app.job.guard.pass || $("override").checked);
-  b.disabled = busy || !app.job || !finalText() || !guardOk || !app.twinlyOnline;
+  const blocked = !!app.job && app.blockedJobs.has(app.job.id);
+  b.disabled = busy || blocked || !app.job || !finalText() || !guardOk || !app.twinlyOnline;
   b.textContent = st === "speaking" ? "Generating your voice…"
+    : blocked ? "Not resent: check Twinly first"
     : app.checking ? "Checking your edit…"
     : !app.twinlyOnline ? "Your voice is offline (text only)"
     : "Approve & speak in my voice";
-  b.title = !app.twinlyOnline ? "Twinly is offline or not set up, so speaking is switched off. Use Copy text instead."
+  b.title = blocked ? "Twinly couldn't confirm this line. Resending could charge twice, so speaking is locked for this recording. Record again to start fresh."
+    : !app.twinlyOnline ? "Twinly is offline or not set up, so speaking is switched off. Use Copy text instead."
     : (app.job && !guardOk) ? "The meaning check blocked this text. Tick the override box to speak it anyway." : "";
 }
 
@@ -647,21 +938,50 @@ $("speak").addEventListener("click", async () => {
   try {
     let res;
     if (app.mock) { await sleep(1500); res = { chunks: [{ url: toneWav(1.6, 440), seconds: 1.6, cached: false }, { url: toneWav(1.6, 554), seconds: 1.6, cached: false }], total_seconds: 3.2, ms: 1500 }; }
-    else res = await api("/api/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: app.job.id, text }) });
+    else res = await api("/api/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: app.job.id, text }) }, 120000);
     if (!res.chunks && res.speak_id) res = await pollSpeak(res.speak_id);
     showAudio(res);
   } catch (e) {
     $("output").hidden = true;
-    if (e.code === "twinly_offline" || e.code === "voice_not_set_up") {
-      app.twinlyOnline = false; document.body.dataset.twinly = "offline";
-      showError(e.message, (e.hint || "") + " Your cleaned-up text is still here to copy.", "twinly-offline");
-    } else if (e.code === "job_unverified") {
-      showError(e.message, (e.hint || "Twinly couldn't verify the job.") + " We won't retry this automatically to protect your credit.");
-    } else showError(e.message || "Couldn't generate audio.", e.hint);
+    showSpeakError(e);
   }
   if (document.body.dataset.state === "speaking") setState("ready");
   syncSpeakButton();
 });
+
+// Twinly failures -> what happened + exact fix steps. voice_starting arrives as code "internal" with a
+// "still starting" message (backend/voice.py), so match on the message too.
+const SPEAK_ERRORS = {
+  voice_starting: { msg: "Your Twinly voice is still starting up.", hint: "This usually takes about a minute after Twinly opens.",
+    steps: ["Keep the Twinly app open on the Mac.", "Wait about a minute.", "Press Approve & speak again."] },
+  voice_not_set_up: { msg: "Your voice clone isn't set up in Twinly yet.", hint: "Speaking needs a built voice clone.", offline: true,
+    steps: ["On the Mac, open Twinly and go to the Voice screen.", "Press Build my clone and wait until it says ready.", "Reload this page, then press Approve & speak."] },
+  twinly_offline: { msg: "VoiceFlow can't reach the Twinly app.", hint: "The Mac may be asleep or Twinly's voice engine stopped.", offline: true,
+    steps: ["Make sure the Mac is awake and Twinly is open and signed in.", "If it is, quit Twinly (Cmd+Q) and reopen it.", "Wait a minute. The speak button comes back when the \u201cYour voice\u201d dot at the top turns green."] },
+  rate_limited: { msg: "Too many voice requests in a short time.", hint: "Twinly allows about 30 requests a minute, and the demo has a spending cap.",
+    steps: ["Wait one minute.", "Press Approve & speak again.", "If it says the spend cap is reached, ask the team before trying more."] },
+  job_unverified: { msg: "Twinly couldn't confirm whether it spoke this line.", hint: "Do not resend: sending again may charge twice. Speaking is locked for this recording.", lock: true,
+    steps: ["Check the Twinly app on the Mac to see whether the line was generated.", "Do not press speak again for this recording.", "To try again, record again or press Use demo clip (that starts a new job)."] },
+  approval: { msg: "Twinly is waiting for approval on the Mac.", hint: "Twinly asks the owner to allow API requests.",
+    steps: ["On the Mac, open Twinly and approve the pending request.", "Press Approve & speak again."] },
+  not_found: { msg: "The server restarted and forgot this recording.", hint: "Jobs live in memory only.",
+    steps: ["Record again, or press Use demo clip."] },
+  timeout: { msg: "Generating your voice took too long.", hint: "Twinly may be busy or its voice engine may have stopped.",
+    steps: ["Check the Twinly app is open on the Mac.", "Wait a minute, then press Approve & speak again."] },
+};
+function speakErrorKind(e) {
+  if (e.code === "voice_starting" || /still starting/i.test(e.message || "")) return "voice_starting";
+  if (/approv/i.test(e.message || "") && /twinly/i.test(e.message || "")) return "approval";
+  return SPEAK_ERRORS[e.code] ? e.code : null;
+}
+function showSpeakError(e) {
+  const kind = speakErrorKind(e), info = SPEAK_ERRORS[kind];
+  if (!info) { showError(e.message || "Couldn't generate audio.", e.hint || "Try again in a moment.", "error", [], "speak"); return; }
+  if (info.lock && app.job) app.blockedJobs.add(app.job.id);
+  if (info.offline) { app.twinlyOnline = false; document.body.dataset.twinly = "offline"; }
+  const msg = kind === "rate_limited" && /spend cap/i.test(e.message || "") ? "The demo's voice spending cap is reached." : info.msg;
+  showError(msg, info.hint + " Your text is still here to copy.", info.offline ? "twinly-offline" : "error", info.steps, "speak");
+}
 
 async function pollSpeak(id) {
   for (let i = 0; i < 75; i++) { // up to ~60 s
@@ -702,6 +1022,11 @@ function playChain(chunks) {
 // ---- wiring ----
 $("record").addEventListener("click", toggleRecord);
 $("demo").addEventListener("click", useDemoClip);
+$("wd-plain").addEventListener("click", usePlainText);
+$("wd-retry").addEventListener("click", retryJob);
+// Remember names between visits (per-browser convenience only; the page works without storage).
+try { $("terms").value = localStorage.getItem("vf-terms") || ""; } catch {}
+$("terms").addEventListener("input", () => { try { localStorage.setItem("vf-terms", $("terms").value); } catch {} });
 $("error-dismiss").addEventListener("click", () => { clearError(); setState("idle"); setStatus("Ready when you are."); });
 $("mock-toggle").checked = app.mock;
 $("mock-toggle").addEventListener("change", (e) => { app.mock = e.target.checked; refreshHealth(); });

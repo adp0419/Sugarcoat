@@ -42,6 +42,12 @@
       <button id="demo" class="secondary" type="button">Use demo clip</button>
     </div>
 
+    <div class="names-field">
+      <label for="terms" class="names-label">Names and special words to keep exactly</label>
+      <p id="terms-help" class="hint">Speech recognition can mishear names. Type them here, separated by commas, before you record. For example: <em>Aryan Patel, Gator Hack</em>.</p>
+      <input id="terms" type="text" autocomplete="off" aria-describedby="terms-help" placeholder="Aryan Patel, Gator Hack">
+    </div>
+
     <div class="opts">
       <fieldset class="modes">
         <legend>How much should we tidy?</legend>
@@ -50,9 +56,6 @@
         <label><input type="radio" name="mode" value="natural"><span>Natural</span></label>
         <label><input type="radio" name="mode" value="presenter"><span>Presenter</span></label>
       </fieldset>
-      <label class="terms">Protected terms <span class="muted">(names or words to keep exactly, comma separated)</span>
-        <input id="terms" type="text" autocomplete="off" placeholder="e.g. Gator Hack, Dr. Okafor">
-      </label>
     </div>
   </section>
 
@@ -67,17 +70,35 @@
       <li data-stage="ready" data-status="idle"><span class="s-name">Ready</span><span class="s-ms"></span></li>
     </ol>
     <p id="status" class="status" role="status" aria-live="polite">Ready when you are.</p>
-    <p id="rung" class="rung" hidden></p>
+    <div id="watch" class="watch" hidden>
+      <p id="watch-msg" class="watch-msg" role="alert"></p>
+      <p id="watch-time" class="muted"></p>
+      <div class="row">
+        <button id="wd-plain" class="primary" type="button">Use text without AI edit</button>
+        <button id="wd-retry" class="secondary" type="button">Try again</button>
+      </div>
+    </div>
   </section>
 
+  <span id="error-home" hidden></span>
   <div id="error" class="error" role="alert" hidden>
     <strong id="error-msg"></strong>
     <span id="error-hint"></span>
+    <ol id="error-steps" class="steps" hidden></ol>
     <button id="error-dismiss" class="secondary" type="button">Dismiss</button>
   </div>
 
   <section id="result" class="result" hidden aria-labelledby="h-result">
     <h2 id="h-result" class="sr-only">Result</h2>
+    <div id="rung" class="rung" hidden>
+      <h3>Why this text looks like this</h3>
+      <p id="rung-text"></p>
+    </div>
+    <ul id="notes" class="notes" hidden></ul>
+    <section id="names" class="panel names" hidden aria-labelledby="h-names">
+      <h3 id="h-names">Names check</h3>
+      <ul id="names-list" class="names-list"></ul>
+    </section>
     <div class="cols">
       <article class="col" aria-labelledby="h-said">
         <h3 id="h-said">What you said</h3>
@@ -130,6 +151,7 @@
         <button id="original" class="secondary" type="button" disabled>Play original recording</button>
         <button id="another" class="secondary" type="button">Try another mode</button>
       </div>
+      <span id="error-speak" hidden></span>
       <label class="dev"><input type="checkbox" id="bad"> <span>Simulate bad rewrite <span class="muted">(dev: injects a wrong day to show the guard)</span></span></label>
     </section>
 
