@@ -6,6 +6,8 @@
   "description": "A dependency-free, cancellable speech cleanup pipeline",
   "engines": { "node": ">=22.0.0" },
   "scripts": {
+    "call": "bash scripts/call-tunnel.sh",
+    "call:sim": "node scripts/call-sim.mjs",
     "start": "node --env-file-if-exists=.env server.mjs",
     "dev": "node --env-file-if-exists=.env --watch server.mjs",
     "preview:ui": "node scripts/preview-ui.mjs",

@@ -154,3 +154,7 @@ VoiceFlowLite/
 ├── scripts/check-google.mjs, smoke-live.mjs
 └── test/pipeline.test.mjs, playback.test.mjs, twinly.test.mjs
 ```
+
+## Call (two laptops)
+
+An optional, separate feature: two people on two MacBooks talk through the cleanup pipeline and each hears the other's cleaned-up words in their own Twinly voice. The single-user page at `/` is unchanged. Setup, commands, error meanings and a pre-demo checklist are in [docs/CALL.md](docs/CALL.md).
