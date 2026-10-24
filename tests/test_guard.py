@@ -10,6 +10,17 @@ CANON_IN = (
 CANON_OUT = "Our meeting will take place on Monday at 5 PM. Everyone should attend."
 
 
+@pytest.fixture(autouse=True)
+def offline_verifier(monkeypatch):
+    """Never call the real Decisions API from unit tests."""
+    from backend import decide
+
+    async def off(original, rewrite):
+        return decide.Verification(False, note="stubbed offline")
+
+    monkeypatch.setattr(decide, "verify", off)
+
+
 def rules(orig, rew, **kw):
     return {v.rule for v in guard.check_rules(orig, rew, **kw).violations}
 
@@ -228,10 +239,74 @@ def test_cli_exit_codes(capsys):
     assert "FAIL" in capsys.readouterr().out
 
 
-def test_async_check_returns_contract_model():
+def test_async_check_returns_contract_model_offline_default():
     import asyncio
 
     res = asyncio.run(guard.check(CANON_IN, "Our meeting will take place on Friday at 5 PM."))
     assert res.pass_ is False and res.verifier == "offline"
     assert res.model_dump(by_alias=True)["pass"] is False
     assert asyncio.run(guard.check(CANON_IN, CANON_OUT)).pass_ is True
+
+
+# ---- combined verdict (deterministic + Decisions verifier) -----------------
+def _with_verifier(monkeypatch, ver):
+    from backend import decide
+
+    async def fake(original, rewrite):
+        if isinstance(ver, Exception):
+            raise ver
+        return ver
+
+    monkeypatch.setattr(decide, "verify", fake)
+    return decide
+
+
+def test_combined_offline_is_deterministic_only(monkeypatch):
+    import asyncio
+
+    from backend import decide
+
+    _with_verifier(monkeypatch, decide.Verification(False, note="no credits"))
+
+    ok_res = asyncio.run(guard.check(CANON_IN, CANON_OUT))
+    assert ok_res.pass_ and ok_res.verifier == "offline" and ok_res.decisions_probs == {}
+
+
+def test_combined_online_approves(monkeypatch):
+    import asyncio
+
+    from backend import decide
+
+    _with_verifier(monkeypatch, decide.Verification(True, {"meaning_preserved": 0.96, "negation_changed": 0.02}))
+    res = asyncio.run(guard.check(CANON_IN, CANON_OUT))
+    assert res.pass_ and res.verifier == "online" and res.decisions_probs["meaning_preserved"] == 0.96
+
+
+def test_combined_online_rejects_even_when_rules_pass(monkeypatch):
+    import asyncio
+
+    from backend import decide
+
+    _with_verifier(monkeypatch, decide.Verification(True, {"meaning_preserved": 0.4, "added_new_information": 0.8}))
+    res = asyncio.run(guard.check(CANON_IN, CANON_OUT))
+    assert not res.pass_ and {v.rule for v in res.violations} == {"decisions_verifier"}
+    assert len(res.violations) == 2
+
+
+def test_combined_deterministic_failure_overrides_verifier_pass(monkeypatch):
+    import asyncio
+
+    from backend import decide
+
+    _with_verifier(monkeypatch, decide.Verification(True, {"meaning_preserved": 0.99}))
+    res = asyncio.run(guard.check(CANON_IN, "Our meeting is on Friday at 5 PM. Everyone should attend."))
+    assert not res.pass_ and res.verifier == "online"
+    assert "superseded_value" in {v.rule for v in res.violations}
+
+
+def test_combined_verifier_exception_degrades_to_offline(monkeypatch):
+    import asyncio
+
+    _with_verifier(monkeypatch, RuntimeError("boom"))
+    res = asyncio.run(guard.check(CANON_IN, CANON_OUT))
+    assert res.pass_ and res.verifier == "offline"

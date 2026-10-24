@@ -6,6 +6,7 @@ verifier says. Run: ``python -m backend.guard "verbatim" "rewrite"``.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import sys
 from dataclasses import dataclass, field
@@ -538,14 +539,42 @@ def check_rules(original: str, rewrite: str, mode: str = "natural", protected: I
     return GuardResult(not vs, vs, summary)
 
 
+_VERIFY_TEXT = {
+    "meaning_preserved": "The AI verifier is not confident the rewrite keeps your meaning.",
+    "added_new_information": "The AI verifier thinks the rewrite adds information you did not say.",
+    "dropped_hedge_or_uncertainty": "The AI verifier thinks the rewrite removes uncertainty you expressed.",
+    "changed_commitment_strength": "The AI verifier thinks the rewrite changes how firmly you committed.",
+    "changed_number_date_or_name": "The AI verifier thinks a number, date, time or name changed.",
+    "negation_changed": "The AI verifier thinks a statement was flipped between yes and no.",
+}
+
+
 async def check(verbatim: str, rewrite: str, mode: str = "natural",
                 protected: Iterable[str] = ()) -> models.GuardResult:
-    """Orchestrator entry point: deterministic rules (hard FAIL) -> contract GuardResult."""
-    det = check_rules(verbatim, rewrite, mode=mode, protected=protected)
+    """Orchestrator entry point: deterministic rules and the Decisions verifier run in parallel.
+
+    pass = no deterministic violation AND (verifier offline OR verifier approves). A deterministic
+    failure is final whatever Decisions says. Never raises because the verifier is down.
+    """
+    from . import decide
+
+    async def verifier():
+        try:
+            return await decide.verify(verbatim, rewrite)
+        except Exception as e:  # verifier trouble must never break the guard
+            return decide.Verification(False, note=f"{type(e).__name__}")
+
+    det, ver = await asyncio.gather(asyncio.to_thread(check_rules, verbatim, rewrite, mode, protected), verifier())
+    violations = [models.Violation(**v.to_dict()) for v in det.violations]
+    online = bool(ver.available)
+    if online and not ver.ok:
+        for name in ver.failures():
+            violations.append(models.Violation(rule="decisions_verifier", message=_VERIFY_TEXT.get(name, name)))
     return models.GuardResult(**{
-        "pass": det.passed,
-        "violations": [models.Violation(**v.to_dict()) for v in det.violations],
-        "verifier": "offline",
+        "pass": not violations,
+        "violations": violations,
+        "decisions_probs": ver.probs if online else {},
+        "verifier": "online" if online else "offline",
     })
 
 
