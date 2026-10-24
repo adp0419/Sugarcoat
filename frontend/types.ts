@@ -56,6 +56,9 @@ export interface Job {
   segment?: number | null;
 }
 
+// Accounts (AUTH_ENABLED=1 only; docs/md/10 "Accounts"). GET/PUT /api/me/voice; PUT body {twinly_key, label?}.
+export interface MeVoice { has_key: boolean; label: string; online: boolean; voice_ready: boolean }
+
 // Stage mode (docs/md/10). POST /api/process also takes fast=1, session, segment.
 export interface ProcessAccepted { job_id: string; session: string | null; segment: number | null }
 export interface SessionJob {

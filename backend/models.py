@@ -20,7 +20,7 @@ EditReason = Literal["filler", "repetition", "self_correction", "false_start", "
 StageName = Literal["convert", "asr", "decide", "rewrite", "guard", "speak"]
 ERROR_CODES = (
     "no_speech", "asr_failed", "twinly_offline", "voice_not_set_up", "rate_limited",
-    "job_unverified", "too_long", "internal", "not_found", "bad_request", "busy", "unsupported_media",
+    "job_unverified", "too_long", "internal", "not_found", "bad_request", "busy", "unsupported_media", "unauthorized",
 )
 # /api/health provider states. no_credits / auth_error come from the most recent real call (never a paid probe).
 ProviderStatus = Literal["ok", "off", "error", "no_credits", "auth_error"]
@@ -157,6 +157,19 @@ class RewriteRequest(_Base):
 class SpeakRequest(_Base):
     job_id: str
     text: str
+
+
+class MeVoiceRequest(_Base):
+    """PUT /api/me/voice (AUTH_ENABLED=1). The key is write-only: no response ever contains it."""
+    twinly_key: str = Field(min_length=10, max_length=300)
+    label: str = Field("", max_length=80)
+
+
+class MeVoice(_Base):
+    has_key: bool
+    label: str = ""
+    online: bool = False
+    voice_ready: bool = False
 
 
 class SpeakAccepted(_Base):

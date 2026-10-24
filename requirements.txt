@@ -4,6 +4,7 @@ pydantic==2.14.1
 pydantic-settings==2.16.1
 python-multipart==0.0.32
 httpx==0.28.1
+cryptography==50.0.2  # AES-GCM for saved Twinly keys (AUTH_ENABLED=1 only)
 openai==3.37.0
 google-genai==2.33.0
 pytest==9.1.1

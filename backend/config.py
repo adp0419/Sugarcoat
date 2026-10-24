@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     DECISIONS_ENABLED: bool = True
     KEEP_AUDIO: bool = False
     DEV: bool = False
+    # accounts groundwork (docs/md/10 "Accounts"); off = single global TWINLY_API_KEY, exactly as before
+    AUTH_ENABLED: bool = False
+    SUPABASE_URL: str = ""
+    SUPABASE_JWT_SECRET: str = ""
+    SUPABASE_SERVICE_KEY: str = ""
+    ENCRYPTION_KEY: str = ""  # 32 random bytes, base64: encrypts each user's saved Twinly key (AES-256-GCM)
+    PROFILE_STORE: str = "sqlite"  # sqlite (cache/profiles.sqlite) | supabase
     HOST: str = "127.0.0.1"
     PORT: int = 8000
 

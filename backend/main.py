@@ -5,7 +5,9 @@ kills the job: it takes the next fallback rung (retry stricter -> minimal -> ori
 or an empty transcript is fatal.
 """
 import asyncio
+import hashlib
 import json
+import os
 import logging
 import re
 import time
@@ -19,11 +21,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import asr, decide, guard, mock, rewrite as rw, speakq, status, voice
+from . import asr, auth, decide, guard, mock, rewrite as rw, speakq, status, voice
 from .config import settings
 from .errors import ApiError, api_error
 from .models import (
-    Decisions, ErrorBody, GuardResult, HealthResponse, Job, LiveResponse, Mode, ProcessAccepted, RewriteRequest,
+    Decisions, ErrorBody, GuardResult, HealthResponse, Job, LiveResponse, MeVoice, MeVoiceRequest, Mode,
+    ProcessAccepted, RewriteRequest,
     SessionJob, SessionResponse, SpeakAccepted, SpeakRequest, SpeakResponse, SpeakStatus, TraceEntry,
     TwinlyHealth, Violation,
 )
@@ -619,7 +622,8 @@ async def rewrite_endpoint(req: RewriteRequest):
 
 
 @app.post("/api/speak", response_model=SpeakResponse)
-async def speak(req: SpeakRequest):
+async def speak(req: SpeakRequest, request: Request):
+    client = await _speaker(request)  # None = global key (AUTH_ENABLED=0: unchanged behaviour)
     text = req.text.strip()
     if not text:
         raise api_error("bad_request", "Nothing to speak.", "Approve some text first.")
@@ -630,6 +634,8 @@ async def speak(req: SpeakRequest):
     try:
         if settings.MOCK:
             res = await mock.speak(text)
+        elif client is not None:
+            res = await asyncio.wait_for(client.speak(text), 60)
         else:
             res = await asyncio.wait_for(voice.speak(text), 60)
     except ApiError:
@@ -657,16 +663,17 @@ def _check_speak_text(text: str) -> str:
     return text
 
 
-def _renderer() -> speakq.Renderer:
+def _renderer(client=None) -> speakq.Renderer:
     if settings.MOCK:
         return speakq.MockRenderer(mock.nap_speak, f"/api/audio/{mock.BACKUP_NAME}", mock.BACKUP_SECONDS)
-    return speakq.TwinlyRenderer(voice._get_client())
+    return speakq.TwinlyRenderer(client or voice._get_client())
 
 
 @app.post("/api/speak/async", status_code=202, response_model=SpeakAccepted)
-async def speak_async(req: SpeakRequest):
+async def speak_async(req: SpeakRequest, request: Request):
     """Stage mode: queue the approved text and return at once; poll GET /api/speak/{speak_id}."""
-    task = speakq.QUEUE.submit(req.job_id, _check_speak_text(req.text), _renderer())
+    text = _check_speak_text(req.text)
+    task = speakq.QUEUE.submit(req.job_id, text, _renderer(await _speaker(request)))
     return SpeakAccepted(speak_id=task.id, queue_position=speakq.QUEUE.position(task), status=task.status)
 
 
@@ -676,6 +683,84 @@ async def speak_status(speak_id: str):
     if task is None:
         raise api_error("not_found", "Unknown speak request.", "It expired (1 h) or the server restarted. Speak again.")
     return speakq.QUEUE.status(task)
+
+
+# ---------------------------------------------------------------- accounts (AUTH_ENABLED=1 only)
+_store: auth.ProfileStore | None = None
+_user_clients: dict[str, Any] = {}  # sha256(user + key) -> voice.TwinlyClient (one per saved key)
+
+
+def _profile_store() -> auth.ProfileStore:
+    global _store
+    if _store is None:
+        if settings.PROFILE_STORE == "supabase":
+            _store = auth.SupabaseStore(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+        else:
+            settings.cache_dir.mkdir(parents=True, exist_ok=True)
+            _store = auth.SQLiteStore(settings.cache_dir / "profiles.sqlite")
+    return _store
+
+
+def _user_id(request: Request) -> str:
+    h = request.headers.get("authorization", "")
+    if not h.lower().startswith("bearer "):
+        raise api_error("unauthorized", "Sign in first.", "Send the Supabase access token as 'Authorization: Bearer ...'.")
+    return str(auth.verify_jwt(h[7:].strip(), settings.SUPABASE_JWT_SECRET)["sub"])
+
+
+def _make_twinly_client(key: str):
+    return voice.TwinlyClient(key, settings.TWINLY_BASE, settings.cache_dir, spend_path=settings.logs_dir / "spend.json",
+                              allow_spend=os.environ.get("ALLOW_SPEND") == "1", log_dir=settings.logs_dir)
+
+
+async def _client_for(user_id: str):
+    p = await _profile_store().get(user_id)
+    if p is None:
+        raise api_error("voice_not_set_up", "No Twinly key saved for your account.", "Add your Twinly key in Settings.")
+    key = auth.decrypt(p.twinly_key_encrypted, settings.ENCRYPTION_KEY, user_id)
+    k = hashlib.sha256(f"{user_id}\x00{key}".encode()).hexdigest()
+    if k not in _user_clients:
+        _user_clients[k] = _make_twinly_client(key)  # its voice_id (cache identity) is derived from the key
+    return _user_clients[k]
+
+
+async def _speaker(request: Request):
+    """AUTH_ENABLED=0 -> None (use the global key, unchanged). Otherwise the signed-in user's Twinly client."""
+    if not settings.AUTH_ENABLED:
+        return None
+    uid = _user_id(request)
+    return None if settings.MOCK else await _client_for(uid)
+
+
+def _auth_on() -> None:
+    if not settings.AUTH_ENABLED:
+        raise api_error("not_found", "Accounts are disabled on this server.", "Set AUTH_ENABLED=1 to use accounts.")
+
+
+async def _me_voice(uid: str) -> MeVoice:
+    p = await _profile_store().get(uid)
+    if p is None:
+        return MeVoice(has_key=False)
+    if settings.MOCK:
+        return MeVoice(has_key=True, label=p.label, online=True, voice_ready=True)
+    tw = await (await _client_for(uid)).health()  # GET /v1/me: free, no render
+    return MeVoice(has_key=True, label=p.label, online=tw.online, voice_ready=tw.voice_ready)
+
+
+@app.get("/api/me/voice", response_model=MeVoice)
+async def me_voice(request: Request):
+    _auth_on()
+    return await _me_voice(_user_id(request))
+
+
+@app.put("/api/me/voice", response_model=MeVoice)
+async def put_me_voice(req: MeVoiceRequest, request: Request):
+    """Save or replace the signed-in user's Twinly key (encrypted at rest). Never echoes the key."""
+    _auth_on()
+    uid = _user_id(request)
+    enc = auth.encrypt(req.twinly_key.strip(), settings.ENCRYPTION_KEY, uid)
+    await _profile_store().put(auth.Profile(uid, enc, req.label.strip()))
+    return await _me_voice(uid)
 
 
 @app.get("/api/audio/{name}")

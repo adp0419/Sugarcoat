@@ -93,8 +93,27 @@ call succeeds. Gemini's free `models.get` succeeds on a key with no credits, so 
 only means "key accepted". Gemma account errors are not retried: the ladder goes straight to the deterministic rung.
 ## POST /api/eval/run (dev only, `DEV=1`) runs eval/utterances.json, returns table.
 
+## Accounts (groundwork, `AUTH_ENABLED=1` only; default off)
+Off (default): no endpoint below exists (404 `not_found`), no token is needed anywhere, every speak uses the global
+`TWINLY_API_KEY`. Nothing else changes.
+On: the browser signs in with Supabase and sends `Authorization: Bearer <access token>`. The backend verifies it
+(HS256 with `SUPABASE_JWT_SECRET`, `aud` = `authenticated`, `exp` checked, 30 s leeway). Projects that sign with
+asymmetric JWKS keys are not supported yet.
+- `GET /api/me/voice` → `{has_key, label, online, voice_ready}` (online/voice_ready from the user's key via the free
+  `GET /v1/me`).
+- `PUT /api/me/voice` `{twinly_key, label?}` → same shape. Saves or replaces the user's Twinly key. The key is
+  write-only: no response ever contains it. Stored as `twinly_key_encrypted` = AES-256-GCM (`ENCRYPTION_KEY`, 32
+  bytes base64, random nonce, user id as associated data).
+- `POST /api/speak`, `POST /api/speak/async` need the token and render with the signed-in user's key. The audio
+  cache key includes the voice identity (derived from the key), so two accounts never share a cached file.
+  401 `unauthorized` without a valid token; 409 `voice_not_set_up` if the user has no saved key.
+- `/api/process`, `/api/live`, `/api/jobs`, `/api/health` stay open (no Twinly key involved).
+- Store: `PROFILE_STORE=sqlite` (cache/profiles.sqlite) or `supabase` (PostgREST table
+  `profiles(user_id uuid primary key, twinly_key_encrypted text not null, label text default '')`, accessed with
+  `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` from the backend only). No real Supabase project has been created or called.
+
 ## Errors
-Uniform `{error:{code, message, hint}}`. Codes: `no_speech`, `asr_failed`, `twinly_offline`, `voice_not_set_up`, `rate_limited`, `job_unverified`, `too_long`, `internal`, `not_found`, `bad_request`, `busy` (429, /api/live), `unsupported_media` (415: upload is not audio; `audio/*`, `video/webm|mp4|quicktime`, `application/octet-stream` accepted). `hint` is user-facing fix text.
+Uniform `{error:{code, message, hint}}`. Codes: `no_speech`, `asr_failed`, `twinly_offline`, `voice_not_set_up`, `rate_limited`, `job_unverified`, `too_long`, `internal`, `not_found`, `bad_request`, `busy` (429, /api/live), `unauthorized` (401, accounts only), `unsupported_media` (415: upload is not audio; `audio/*`, `video/webm|mp4|quicktime`, `application/octet-stream` accepted). `hint` is user-facing fix text.
 
 ## Security
 Keys only in env. `/api/*` bound to 127.0.0.1 unless `HOST=0.0.0.0` set deliberately. Max upload 10 MB. Delete uploaded audio after ASR unless `KEEP_AUDIO=1` (privacy line for README). Don't log API keys or audio_b64 (log lengths only).
