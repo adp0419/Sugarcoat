@@ -25,7 +25,7 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 
 ## T2 guard / decide / voice
 - [x] 1  guard.py deterministic checks + unit tests (42 cases; `check_rules` sync, `check` async contract wrapper) (2026-10-23 23:46)
-- [ ] 2  decide.py (OpenAI Decisions: analysis + per-sentence)
+- [x] 2  decide.py (analyze + verify, 15 tests) (2026-10-23 00:05). G2 PARTIAL: request schema + 400-question limit verified live, but key has no credits (429), so success response shape unverified; offline path verified live
 - [x] 2  split.py (sentences + <=550 chunk packer) (2026-10-23 23:50)
 - [x] 2  voice.py client + 20 tests + MOCK path (2026-10-23 23:58). G1 PARTIAL: real call returns voice_not_set_up; Mac owner must Build my clone, then re-run `python -m backend.voice "Hello, this is a test."` once
 - [ ] 3  guard Decisions verifier pass (combined verdict)

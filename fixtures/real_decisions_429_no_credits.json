@@ -1,0 +1,41 @@
+{
+  "http_status": 429,
+  "request": {
+    "model": "gpt-6-luna",
+    "input": "So, um, I just wanted to, uh, announce that we're going to have our meeting on Friday\u2014actually, sorry, Monday, at 5 PM, and, um, everyone should be there.",
+    "questions": [
+      {
+        "type": "predicate",
+        "name": "has_self_correction",
+        "instructions": "Does the speaker correct or retract something they said earlier?"
+      },
+      {
+        "type": "choice",
+        "name": "register",
+        "instructions": "What register is this?",
+        "choices": [
+          {
+            "value": "casual",
+            "description": "informal chat"
+          },
+          {
+            "value": "professional",
+            "description": "workplace"
+          },
+          {
+            "value": "announcement",
+            "description": "addressing a group"
+          }
+        ]
+      }
+    ]
+  },
+  "response": {
+    "error": {
+      "message": "You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.",
+      "type": "insufficient_quota",
+      "param": null,
+      "code": "credit_balance_exhausted"
+    }
+  }
+}
