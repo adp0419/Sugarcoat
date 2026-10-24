@@ -6,95 +6,128 @@
   <meta name="theme-color" content="#0a0a0a">
   <meta name="color-scheme" content="dark">
   <meta name="robots" content="noindex">
-  <meta name="description" content="A two-person voice call. Hold to talk; the other person hears your cleaned-up words in your voice.">
-  <title>VoiceFlow Call</title>
+  <meta name="description" content="VoiceFlow Comms: voice messages that arrive as polished text, and voice calls in your own cloned voice.">
+  <title>VoiceFlow Comms</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/call.css">
   <script type="module" src="/call.js"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div class="header-inner">
-      <div class="brand">
+  <!-- Sign in -->
+  <main id="login" class="login">
+    <form id="loginForm" class="login-card" novalidate>
+      <div class="brand login-brand">
         <svg class="mark" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v4m5-9v14m5-18v22m5-18v14m5-9v4"/></svg>
-        <span>VoiceFlow</span><span class="edition">Call</span>
+        <span>VoiceFlow</span><span class="edition">Comms</span>
       </div>
-      <span class="header-context">Two-way voice</span>
-    </div>
-  </header>
-  <main id="main">
-    <div class="page-intro">
-      <h1>Say it clearly.<br><span>They hear it in your voice.</span></h1>
-      <p class="intro">Hold to talk. Release to send. <br>Take turns: one voice at a time.</p>
-    </div>
+      <h1>Welcome back</h1>
+      <p class="hint">Sign in to message and call your team.</p>
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <p id="loginError" class="error" role="alert" hidden></p>
+      <button id="signIn" class="talk" type="submit">Sign in</button>
+    </form>
+  </main>
 
-    <div class="frame">
-      <div class="controls">
-      <section class="session" aria-labelledby="sessionLabel">
-        <div class="section-heading">
-          <h2 id="sessionLabel">Call</h2>
-          <p id="connection" class="state-label" role="status" data-state="idle">Not joined</p>
-        </div>
-        <div class="section-body">
-          <fieldset class="identity" id="identity">
-            <legend>I am</legend>
-            <label class="who-choice"><input type="radio" name="who" value="aryan"><span>Aryan</span></label>
-            <label class="who-choice"><input type="radio" name="who" value="rohit"><span>Rohit</span></label>
-          </fieldset>
-          <p id="presence" class="presence" role="status" data-state="idle"><span class="dot" aria-hidden="true"></span><span id="presenceText">Join the call to see who is here.</span></p>
-          <div class="session-actions">
-            <button id="join" class="talk join" type="button">Join call</button>
-            <button id="leave" class="secondary" type="button" hidden>Leave call</button>
-            <button id="enable" class="secondary playback-recovery" type="button" hidden>Enable playback</button>
-          </div>
-          <p id="linkError" class="error" role="alert" hidden></p>
-          <p class="hint headphones">Use headphones so the microphone doesn’t pick up the other person’s voice.</p>
-        </div>
-      </section>
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <nav class="rail" aria-label="Direct messages">
+      <div class="rail-brand brand">
+        <svg class="mark" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v4m5-9v14m5-18v22m5-18v14m5-9v4"/></svg>
+        <span>VoiceFlow</span><span class="edition">Comms</span>
+      </div>
+      <h2 class="rail-heading">Direct messages</h2>
+      <ul class="dm-list">
+        <li><button id="dmPeer" class="dm-item" type="button" aria-current="page">
+          <span class="avatar" id="peerAvatar" aria-hidden="true"></span>
+          <span class="dm-text"><span id="peerNameRail" class="dm-name"></span><span id="peerState" class="dm-state">Offline</span></span>
+          <span id="peerDot" class="status-dot" data-state="offline" aria-hidden="true"></span>
+        </button></li>
+      </ul>
+      <div class="me-panel">
+        <span class="avatar" id="meAvatar" aria-hidden="true"></span>
+        <span class="dm-text"><span id="meName" class="dm-name"></span><span id="connection" class="dm-state" role="status" data-state="idle">Not connected</span></span>
+        <button id="logout" class="icon-button" type="button" aria-label="Log out" title="Log out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg>
+        </button>
+      </div>
+    </nav>
 
-
-      <section class="turn-control" aria-labelledby="turnLabel">
-        <div class="section-heading">
-          <h2 id="turnLabel">Your turn</h2>
-          <p id="status" role="status" aria-live="polite" data-state="ready"><span class="dot" aria-hidden="true"></span><span id="statusText">Join the call to talk</span></p>
+    <section class="dm" aria-labelledby="dmTitle">
+      <header class="dm-header">
+        <div class="dm-title">
+          <span class="at" aria-hidden="true">@</span>
+          <h1 id="dmTitle"></h1>
+          <p id="presence" class="presence" role="status" data-state="idle"><span class="dot" aria-hidden="true"></span><span id="presenceText"></span></p>
         </div>
-        <div class="section-body">
+        <div class="call-actions">
+          <button id="join" class="join-call" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 11v2m4-6v10m4-13v16m4-13v10m4-6v2"/></svg>
+            Join call
+          </button>
+          <button id="leave" class="leave-call" type="button" hidden>Leave call</button>
+        </div>
+      </header>
+
+      <p id="linkError" class="banner error" role="alert" hidden></p>
+
+      <!-- Voice call (shown after Join call) -->
+      <section id="callPanel" class="call-panel" aria-labelledby="callLabel" hidden>
+        <h2 id="callLabel" class="visually-hidden">Voice call</h2>
+        <div class="tiles">
+          <div class="tile" id="tileMe" data-state="in"><span class="avatar big" id="tileMeAvatar" aria-hidden="true"></span><span id="tileMeName"></span><span class="tile-state">In call</span></div>
+          <div class="tile" id="tilePeer" data-state="out"><span class="avatar big" id="tilePeerAvatar" aria-hidden="true"></span><span id="tilePeerName"></span><span class="tile-state" id="tilePeerState">Not joined</span></div>
+        </div>
+        <div class="call-controls">
+          <p id="status" role="status" aria-live="polite" data-state="ready"><span class="dot" aria-hidden="true"></span><span id="statusText">Ready</span></p>
           <button id="talk" class="talk" type="button" disabled aria-describedby="talkHint">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
             <span id="talkLabel">Hold to Talk</span>
           </button>
-          <p id="talkHint" class="hint keyboard-hint"><span id="hintText">Join the call first.</span> <span id="hintKeys" hidden>Hold the button to speak, or hold <kbd>Space</kbd>.</span></p>
-          <button id="cancel" class="secondary" type="button" disabled>Cancel <kbd aria-hidden="true">Esc</kbd></button>
-          <p id="error" role="alert" hidden></p>
-
+          <p id="talkHint" class="hint keyboard-hint"><span id="hintText"></span> <span id="hintKeys" hidden>Hold the button, or hold <kbd>Space</kbd>. They hear you in your cloned voice.</span></p>
+          <div class="call-row">
+            <button id="cancel" class="secondary" type="button" disabled>Cancel <kbd aria-hidden="true">Esc</kbd></button>
+            <button id="enable" class="secondary playback-recovery" type="button" hidden>Enable playback</button>
+          </div>
           <details id="devices" class="devices">
             <summary>Microphone and speaker</summary>
             <div class="devices-body">
               <label for="micSelect">Microphone</label>
-              <select id="micSelect" disabled><option value="">Default microphone</option></select>
+              <select id="micSelect"><option value="">Default microphone</option></select>
               <label for="speakerSelect">Speaker</label>
-              <select id="speakerSelect" disabled><option value="">Default speaker</option></select>
+              <select id="speakerSelect"><option value="">Default speaker</option></select>
               <button id="listDevices" class="secondary" type="button">Allow microphone to show device names</button>
               <p id="deviceNote" class="hint" role="status"></p>
             </div>
           </details>
         </div>
       </section>
+
+      <!-- Thread -->
+      <div class="thread">
+        <ol id="log" class="log" role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="dmTitle" tabindex="0"></ol>
+        <div id="logEmpty" class="log-empty">
+          <span class="avatar big" id="emptyAvatar" aria-hidden="true"></span>
+          <p class="empty-title" id="emptyTitle"></p>
+          <p class="hint">Hold the mic below to send a voice message. It arrives as clean, professional text. Join the call to talk in your cloned voice.</p>
+        </div>
+        <span id="logState" class="visually-hidden">No messages yet</span>
       </div>
 
-      <section class="conversation chat" aria-labelledby="logLabel">
-        <div class="section-heading">
-          <h2 id="logLabel">Chat</h2>
-          <span id="logState" class="state-label">No messages yet</span>
+      <!-- Composer: voice message -->
+      <footer class="composer">
+        <p id="error" class="error" role="alert" hidden></p>
+        <div class="composer-bar">
+          <button id="record" class="record" type="button" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"/></svg>
+            <span id="recordLabel">Hold to record a voice message</span>
+          </button>
+          <p id="composerHint" class="hint"></p>
         </div>
-        <ol id="log" class="log" role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="logLabel" tabindex="0"></ol>
-        <p id="logEmpty" class="hint log-empty">What you both say shows up here as it happens.</p>
-      </section>
-    </div>
-
-    <footer>
-      <p class="privacy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg><span>Audio is processed in memory.<br class="mobile-break"> This page keeps no recordings.</span></p>
-    </footer>
-  </main>
+      </footer>
+    </section>
+  </div>
 </body>
 </html>

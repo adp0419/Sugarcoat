@@ -364,3 +364,35 @@ test('regression: /api/process still streams the same NDJSON sequence and ignore
   assert.equal((await fetch(`${f.base}/nope`)).status, 404);
   assert.equal((await fetch(`${f.base}/api/process`)).status, 405);
 });
+
+test('a voice message delivers cleaned text to the peer without rendering any voice', async t => {
+  let renders = 0;
+  const f = await fixture(t, {}, { synthesize: async ({ text }) => { renders++; return mp3(text); } });
+  const rohit = await connect(t, f, 'rohit'); await connect(t, f, 'aryan');
+  const reply = await fetch(f.url('/api/call/message', 'aryan'), { method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: Buffer.from('audio') });
+  assert.equal(reply.status, 200);
+  const lines = await ndjson(reply);
+  assert.deepEqual(lines.find(l => l.type === 'cleaned')?.text, MOCK_CLEANED);
+  assert.equal(lines.at(-1).type, 'done');
+  assert.equal(lines.at(-1).lines, 0);
+  const message = await rohit.waitFor(e => e.event === 'message');
+  assert.equal(message.data.from, 'aryan');
+  assert.equal(message.data.text, MOCK_CLEANED);
+  assert.equal(renders, 0, 'no Twinly line is spent on a voice message');
+  assert.ok(!rohit.names().includes('clip') && !rohit.names().includes('caption'));
+});
+
+test('joining and leaving the voice channel is shown to the peer and resets when they go offline', async t => {
+  const f = await fixture(t, {}, { synthesize: async ({ text }) => mp3(text) });
+  const rohit = await connect(t, f, 'rohit'); const aryan = await connect(t, f, 'aryan');
+  const voice = (as, value) => fetch(f.url('/api/call/voice', as), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ in: value }) });
+  assert.equal((await voice('aryan', 'yes')).status, 400);
+  const joined = await (await voice('aryan', true)).json();
+  assert.deepEqual(joined, { inVoice: true, peerInVoice: false });
+  assert.equal((await rohit.waitFor(e => e.event === 'voice')).data.in, true);
+  const poll = await (await fetch(f.url('/api/call/poll', 'rohit'))).json();
+  assert.equal(poll.peerInVoice, true);
+  assert.equal(poll.inVoice, false);
+  aryan.close();
+  await rohit.waitFor(e => e.event === 'voice' && e.data.in === false);
+});

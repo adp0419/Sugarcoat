@@ -64,11 +64,13 @@ def main():
                 join.click()
             except Exception:  # noqa: BLE001  (already joined)
                 pass
+        # Talk unlocks only once both people are in the call.
+        for who, page in pages.items():
             try:
                 page.locator("#talk:not([disabled])").wait_for(timeout=10000)
             except Exception:  # noqa: BLE001
                 check(False, f"{who} talk button never became enabled")
-        time.sleep(1.5)  # let both SSE streams connect
+        time.sleep(1.5)  # let both connections settle
 
         def talk(sender, receiver):
             print(f"\n{sender} -> {receiver}")

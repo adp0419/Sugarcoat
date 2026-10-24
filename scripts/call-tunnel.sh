@@ -59,10 +59,10 @@ done
 [ -n "$URL" ] || { echo "Could not find the tunnel URL in cloudflared output:" >&2; cat "$TMP/tunnel.log" >&2; exit 1; }
 
 echo
-echo "Aryan: $URL/call?as=aryan&t=$CALL_TOKEN"
-echo "Rohit: $URL/call?as=rohit&t=$CALL_TOKEN"
+echo "Open on both Macs:  $URL/call?t=$CALL_TOKEN"
+echo "Sign in:            Aryan / 1234    Rohit / 4321"
 echo
-echo "Share only Rohit's link. Ctrl-C stops the server and the tunnel."
+echo "The link changes every run. Ctrl-C stops the server and the tunnel."
 
 # Exit if either child dies.
 while kill -0 "$SERVER_PID" 2>/dev/null && kill -0 "$TUNNEL_PID" 2>/dev/null; do sleep 1; done

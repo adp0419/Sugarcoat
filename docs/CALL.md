@@ -26,6 +26,15 @@ Rohit:
 - Headphones on. Without them the mic picks up the other person's voice and it loops.
 - Nothing to install. If Rohit later uses his own Twinly key, his Mac needs Twinly open, signed in, voice clone ready, Jobs enabled and awake (`caffeinate -d`) too.
 
+## Comms page (sign in, voice messages, voice call)
+
+`npm run call` prints **one link** (`…/call?t=TOKEN`) for everyone, plus the demo logins: **Aryan / 1234** and **Rohit / 4321**. The logins are checked in the page only (demo accounts); the token in the link is what guards the server.
+
+- **Voice message** (hold *Hold to record a voice message*): speech is transcribed and cleaned by the same pipeline, then delivered to the other person's DM as text. No Twinly line is spent (`POST /api/call/message`).
+- **Voice call** (press *Join call*): today's push-to-talk call; the other person hears you in your cloned voice. Talk unlocks once both people have joined (`POST /api/call/voice {in}`; the poll reply carries `inVoice` / `peerInVoice`).
+- Both people must be signed in for anything to be delivered.
+- Old `?as=aryan&t=…` links still work and skip the sign-in (used by `call-sim` and `call-e2e.py`).
+
 ## Commands
 
 Aryan, in the repo:
