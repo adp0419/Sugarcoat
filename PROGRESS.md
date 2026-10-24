@@ -34,7 +34,8 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 ## T3 frontend
 - [x] 1  frontend/ skeleton (index.html, app.js, style) + record/mode/terms/demo (2026-10-23, offline mock toggle; real server not yet tried)
 - [x] T3-cp2 stage timeline, SSE + 800 ms polling fallback (2026-10-23)
-- [ ] 2  side-by-side transcripts + diff highlight
+- [x] 2  side-by-side transcripts + LCS diff with reason chips (2026-10-23)
+- [x] T3-cp4 decisions panel, guard panel, trace panel (2026-10-23)
 - [ ] 3  decisions panel, guard panel, approve + playback, SSE with polling fallback
 - [ ] 4  integrate on real backend
 - [ ] 5  polish, "Simulate bad rewrite" button, README screenshots

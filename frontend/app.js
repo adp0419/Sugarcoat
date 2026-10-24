@@ -341,8 +341,168 @@ function mockGuard(text) {
   return { pass: !bad, violations, decisions_probs: { meaning_preserved: bad ? 0.31 : 0.97, changed_number_date_or_name: bad ? 0.88 : 0.04 }, verifier: "online" };
 }
 
-// ---- placeholder until checkpoint 3 ----
-function renderJob(job) { $("result").hidden = false; $("verbatim").textContent = job.verbatim; $("final-text").value = job.rewrite; setState("ready"); }
+// ---------- rendering: two columns, diff, panels ----------
+const FILLER_RE = /\b(um+|uh+|er+m?|ah+|hmm+|you know|i mean)\b/gi;
+const norm = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+
+function renderVerbatim(text) {
+  const p = $("verbatim"); p.replaceChildren();
+  let last = 0;
+  for (const m of text.matchAll(FILLER_RE)) {
+    p.append(text.slice(last, m.index), el("span", { class: "filler", text: m[0] }));
+    last = m.index + m[0].length;
+  }
+  p.append(text.slice(last));
+}
+
+// Word-level LCS diff -> ops [{t:"eq"|"del"|"ins", w}]
+function diffWords(a, b) {
+  const A = a.split(/\s+/).filter(Boolean), B = b.split(/\s+/).filter(Boolean);
+  const n = A.length, m = B.length;
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    L[i][j] = norm(A[i]) === norm(B[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const ops = []; let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (norm(A[i]) === norm(B[j])) { ops.push({ t: "eq", w: B[j] }); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) ops.push({ t: "del", w: A[i++] });
+    else ops.push({ t: "ins", w: B[j++] });
+  }
+  while (i < n) ops.push({ t: "del", w: A[i++] });
+  while (j < m) ops.push({ t: "ins", w: B[j++] });
+  return ops;
+}
+
+// Pick the backend edit whose text overlaps this hunk the most.
+function reasonFor(del, ins, edits, edited) {
+  const words = (s) => new Set(s.split(/\s+/).map(norm).filter(Boolean));
+  const D = words(del), I = words(ins);
+  let best = null, score = 0;
+  for (const e of edits || []) {
+    const f = words(e.from || ""), t = words(e.to || "");
+    let sc = 0; D.forEach((w) => { if (f.has(w)) sc++; }); I.forEach((w) => { if (t.has(w)) sc++; });
+    if (sc > score) { score = sc; best = e; }
+  }
+  if (best) return best.reason;
+  return edited ? "Changed by you" : "Tidied by VoiceFlow";
+}
+
+function renderDiff() {
+  if (!app.job) return;
+  const ops = diffWords(app.job.verbatim, $("final-text").value);
+  const edited = $("final-text").value.trim() !== (app.job.rewrite || "").trim();
+  const box = $("diff"); box.replaceChildren();
+  let k = 0;
+  while (k < ops.length) {
+    if (ops[k].t === "eq") { box.append(ops[k].w + " "); k++; continue; }
+    const dels = [], inss = [];
+    while (k < ops.length && ops[k].t !== "eq") { (ops[k].t === "del" ? dels : inss).push(ops[k].w); k++; }
+    const d = dels.join(" "), n = inss.join(" ");
+    const reason = reasonFor(d, n, app.job.edits, edited);
+    const h = el("span", { class: "hunk", tabindex: "0" });
+    if (d) h.append(el("del", { text: d }), " ");
+    if (n) h.append(el("ins", { text: n }), " ");
+    h.append(el("span", { class: "chip", role: "note", text: reason }), " ");
+    box.append(h);
+  }
+}
+
+const PRED_LABEL = {
+  has_filler: "Filler words", has_repetition: "Repeated words", has_self_correction: "Self-correction",
+  has_false_start: "False start", is_incomplete_thought: "Unfinished thought", contains_hedging: "Hedging (maybe, I think)",
+  is_already_fluent: "Already fluent",
+};
+function renderDecisions(d) {
+  const chips = $("chips"), bars = $("bars"); chips.replaceChildren(); bars.replaceChildren();
+  if (!d) { chips.append(el("span", { class: "muted", text: "No analysis available for this run." })); return; }
+  if (d.recommended_mode) chips.append(el("span", { class: "chip-pill", text: "Suggested mode: " + d.recommended_mode }));
+  if (d.register) chips.append(el("span", { class: "chip-pill", text: "Register: " + d.register }));
+  for (const [name, p] of Object.entries(d.predicates || {})) {
+    const label = PRED_LABEL[name] || name.replace(/_/g, " ");
+    const fill = el("span", { class: "fill" }); fill.style.width = pct(p);
+    bars.append(el("li", {},
+      el("span", { text: label }),
+      el("span", { class: "track", role: "img", "aria-label": label + " " + pct(p) }, fill),
+      el("span", { class: "pct", text: pct(p) })));
+  }
+}
+
+// Plain-English version of the guard's rules (docs/md/08). Violation.rule strings are matched loosely.
+const GUARD_RULES = [
+  { id: "hedge", re: /hedge/i, text: "Words like \"maybe\" and \"I think\" were kept" },
+  { id: "invent", re: /invent|added|new_fact|subset|no_invention/i, text: "Nothing new was added" },
+  { id: "correct", re: /correct|supersed|final/i, text: "Your corrections were respected" },
+  { id: "drop", re: /drop|missing|omit/i, text: "No important detail was dropped" },
+  { id: "negation", re: /negat|polarity/i, text: "Yes/no meaning is unchanged" },
+  { id: "strength", re: /quantif|modal|strength/i, text: "\"All/some\" and \"will/might\" are unchanged" },
+  { id: "length", re: /length/i, text: "The length is reasonable" },
+];
+function renderGuard(g) {
+  const v = $("guard-verdict"), list = $("guard-rules"); list.replaceChildren();
+  if (!g) { v.textContent = "Not checked yet."; v.dataset.pass = ""; return; }
+  v.dataset.pass = String(!!g.pass);
+  v.textContent = g.pass ? "✓ Passed: the meaning is the same as what you said." : "✗ Blocked: this text may not mean what you said.";
+  const hits = new Map(); const other = [];
+  for (const x of g.violations || []) {
+    const rule = typeof x === "string" ? { rule: "", message: x } : x;
+    const idx = /^\d+$/.test(String(rule.rule)) ? Number(rule.rule) - 1 : -1;
+    const match = GUARD_RULES.find((r, i) => i === idx || r.re.test(rule.rule || ""));
+    if (match) { if (!hits.has(match.id)) hits.set(match.id, []); hits.get(match.id).push(rule); } else other.push(rule);
+  }
+  const why = (r) => r.message || ((r.original_span || "") + " → " + (r.rewrite_span || ""));
+  for (const r of GUARD_RULES) {
+    const f = hits.get(r.id);
+    const li = el("li", { "data-ok": String(!f) }, r.text);
+    if (f) f.forEach((x) => li.append(el("span", { class: "why", text: why(x) })));
+    list.append(li);
+  }
+  for (const x of other) list.append(el("li", { "data-ok": "false" }, "Another check failed", el("span", { class: "why", text: why(x) })));
+  const mp = (g.decisions_probs || {}).meaning_preserved;
+  $("guard-note").textContent = g.verifier === "offline"
+    ? "AI verifier offline: only the fixed checks above ran."
+    : mp != null ? "AI second opinion: " + pct(mp) + " sure the meaning is preserved." : "";
+}
+
+function renderTrace(trace) {
+  const tb = $("trace"); tb.replaceChildren();
+  for (const t of trace || []) {
+    tb.append(el("tr", {},
+      el("td", { text: t.stage + (t.ok ? "" : " (failed)") }),
+      el("td", { text: fmtMs(t.ms || 0) }),
+      el("td", { text: t.model || "-" }),
+      el("td", { text: t.error || t.preview || "" })));
+  }
+}
+
+const RUNG_TEXT = {
+  retry: "Safe fallback: the first edit didn't pass, so a second attempt is shown.",
+  minimal: "Safe fallback: showing the lightest edit (fillers only) because bigger edits didn't pass the meaning check.",
+  original: "Safe fallback: showing your original words because no edit passed the meaning check.",
+};
+function renderRung(rung) {
+  const b = $("rung");
+  b.hidden = !RUNG_TEXT[rung];
+  b.textContent = RUNG_TEXT[rung] || "";
+}
+
+function renderJob(job, fresh) {
+  $("result").hidden = false;
+  renderVerbatim(job.verbatim || "");
+  if (fresh) $("final-text").value = job.rewrite || "";
+  renderDiff();
+  renderDecisions(job.decisions);
+  renderGuard(job.guard);
+  renderTrace(job.trace);
+  renderRung(job.rung);
+  $("override").checked = false;
+  const ok = !job.guard || job.guard.pass;
+  $("override-wrap").hidden = ok;
+  setState(ok ? "ready" : "guard-failed");
+  setStatus(ok ? "Ready. Check the text, then approve it to hear it in your voice." : "The meaning check blocked this text. Review it below.");
+  syncSpeakButton();
+}
+
+// ---- placeholder until checkpoint 5 ----
 function syncSpeakButton() {}
 function stopPlayback() {}
 // ---- wiring ----
