@@ -667,6 +667,7 @@ function explainFailure(stage, raw) { return (SERVICE[stage] || "A step") + " " 
 // Why the ladder landed where it did, from the trace the backend already returns.
 function fallbackCause(job) {
   const t = job.trace || [];
+  if ((job.notes || []).some((n) => /watchdog/i.test(n))) return "The AI steps took too long and the server stopped waiting";
   const failedEdit = t.find((x) => x.stage === "rewrite" && !x.ok && x.model !== "deterministic");
   if (failedEdit) return "The AI editor (Gemma 4) " + errorReason(failedEdit.error); // raw error stays in the trace details
   const blocked = t.find((x) => x.stage === "guard" && x.ok && /^FAIL/i.test(x.preview || ""));
@@ -694,7 +695,7 @@ const NOTE_TEXT = [
   [/verifier offline/i, "The AI second opinion was unavailable, so only the fixed meaning checks ran."],
   [/decisions api (unavailable|disabled)/i, "The analysis service (OpenAI Decisions) was unavailable, so we used Natural mode and the fixed meaning checks only."],
   [/guard not available/i, "The meaning check wasn't available, so this text is NOT verified. Read it carefully before approving."],
-  [/no changes made/i, null], // covered by the rung box
+  [/watchdog|no changes made/i, null], // covered by the rung box
 ];
 function renderNotes(notes) {
   const out = [];

@@ -69,6 +69,9 @@ def build(name, jid, terms):
                                   tr("rewrite", False, 20000, "gemma-4-26b-a4b-it", error="TimeoutError: Gemini did not answer within 20 s"),
                                   tr("rewrite", True, 3, "deterministic", preview=MINIMAL),
                                   tr("guard", True, 30, "deterministic+decisions", preview="FAIL: Friday was corrected to Monday but still appears (verifier offline)")])
+    elif name == "fallback-watchdog":  # backend/main.py JOB_DEADLINE_S hit: no rewrite trace entry, just the note
+        done.update(rung="original", rewrite=VERBATIM, guard=guard(), notes=["ladder: watchdog timeout - no changes made"],
+                    trace=head + [tr("decide", ms=900, model="gpt-6-luna")])
     else:  # ok / speak scenarios
         done.update(rung="full", rewrite=REWRITE, guard=guard(),
                     edits=[{"from": "So um", "to": "", "reason": "filler"}, {"from": "uh Friday, no wait,", "to": "", "reason": "self_correction"}],

@@ -164,6 +164,15 @@ def case_fallbacks(b):
     check("original rung: nothing changed, exactly what we heard", "nothing was changed" in rung and "exactly what we heard" in rung, rung)
     pg.close()
 
+    scenario("fallback-watchdog")
+    pg = b.new_page(viewport={"width": 1280, "height": 900})
+    start(pg, SCEN)
+    pg.wait_for_selector("#result:not([hidden])", timeout=15000)
+    rung = pg.inner_text("#rung-text")
+    check("backend watchdog: blames the slow AI, not the meaning check", "took too long" in rung and "meaning check" not in rung, rung)
+    check("backend watchdog: raw note not shown", pg.is_hidden("#notes"))
+    pg.close()
+
 
 SPEAK_EXPECT = {
     "voice_starting": ("still starting up", "Wait about a minute."),
