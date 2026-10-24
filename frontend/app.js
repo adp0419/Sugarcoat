@@ -101,6 +101,7 @@ function fmtTime(s) { return Math.floor(s / 60) + ":" + String(Math.floor(s % 60
 
 async function startRecording() {
   clearError();
+  stopPlayback(); // cancel any chained playback before the mic opens
   const problem = supportProblem();
   if (problem) { showError("Recording isn't available here.", problem, "unsupported"); return; }
   try {
@@ -200,8 +201,8 @@ function silentWav(seconds = 1.5, rate = 16000) {
 async function useDemoClip() {
   clearError();
   resetResult();
-  // Prefer a real recorded clip shipped with the frontend; fall back to silence for mock runs.
-  for (const url of ["demo-clip.m4a", "demo-clip.webm", "demo-clip.wav"]) {
+  // demo-clip.m4a is a macOS `say` voice reading the canonical messy announcement (not a person). Falls back to silence for mock runs.
+  for (const url of ["demo-clip.m4a"]) {
     try {
       const r = await fetch(url);
       const type = r.headers.get("content-type") || "";
@@ -390,7 +391,7 @@ function reasonFor(del, ins, edits, edited) {
 function renderDiff() {
   if (!app.job) return;
   const ops = diffWords(app.job.verbatim, $("final-text").value);
-  const edited = $("final-text").value.trim() !== (app.job.rewrite || "").trim();
+  const edited = $("final-text").value.trim() !== (app.baseRewrite || app.job.rewrite || "").trim();
   const box = $("diff"); box.replaceChildren();
   let k = 0;
   while (k < ops.length) {
@@ -488,7 +489,7 @@ function renderRung(rung) {
 function renderJob(job, fresh) {
   $("result").hidden = false;
   renderVerbatim(job.verbatim || "");
-  if (fresh) $("final-text").value = job.rewrite || "";
+  if (fresh) { $("final-text").value = job.rewrite || ""; app.baseRewrite = job.rewrite || ""; }
   renderDiff();
   renderDecisions(job.decisions);
   renderGuard(job.guard);
@@ -502,9 +503,191 @@ function renderJob(job, fresh) {
   syncSpeakButton();
 }
 
-// ---- placeholder until checkpoint 5 ----
-function syncSpeakButton() {}
-function stopPlayback() {}
+// ---------- editing, re-running, simulate-bad ----------
+let editTimer = 0, editSeq = 0;
+
+function finalText() { return $("final-text").value.trim(); }
+
+function syncSpeakButton() {
+  const b = $("speak");
+  const st = document.body.dataset.state;
+  const busy = st === "speaking" || app.checking;
+  const guardOk = !!app.job && (!app.job.guard || app.job.guard.pass || $("override").checked);
+  b.disabled = busy || !app.job || !finalText() || !guardOk || !app.twinlyOnline;
+  b.textContent = st === "speaking" ? "Generating your voice…"
+    : app.checking ? "Checking your edit…"
+    : !app.twinlyOnline ? "Your voice is offline (text only)"
+    : "Approve & speak in my voice";
+  b.title = !app.twinlyOnline ? "Twinly is offline or not set up, so speaking is switched off. Use Copy text instead."
+    : (app.job && !guardOk) ? "The meaning check blocked this text. Tick the override box to speak it anyway." : "";
+}
+
+function mergeJob(res, keepText) {
+  const text = $("final-text").value;
+  Object.assign(app.job, res);
+  if (keepText) $("final-text").value = text;
+}
+
+async function checkEdited() {
+  if (!app.job) return;
+  const seq = ++editSeq, text = finalText();
+  if (!text) { app.job.guard = { pass: false, violations: [{ rule: "length", message: "The text is empty, so there is nothing to speak." }], decisions_probs: {}, verifier: "offline" }; renderJob(app.job, false); return; }
+  app.checking = true; syncSpeakButton(); setStatus("Checking your edit…");
+  try {
+    const res = app.mock ? { guard: mockGuard(text), rewrite: text } : await api("/api/rewrite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: app.job.id, edited_text: text }) });
+    if (seq !== editSeq) return;
+    mergeJob(res, true);
+  } catch (e) {
+    if (seq !== editSeq) return;
+    app.job.guard = { pass: false, violations: [{ rule: "", message: "We couldn't check this edit (" + (e.message || "error") + "). Speak it only if you're sure it says what you meant." }], decisions_probs: {}, verifier: "offline" };
+  } finally { if (seq === editSeq) app.checking = false; }
+  renderJob(app.job, false);
+}
+
+$("final-text").addEventListener("input", () => {
+  renderDiff(); syncSpeakButton();
+  clearTimeout(editTimer); editTimer = setTimeout(checkEdited, 700);
+});
+$("override").addEventListener("change", syncSpeakButton);
+
+$("bad").addEventListener("change", (e) => {
+  if (!app.job) { e.target.checked = false; return; }
+  const base = app.baseRewrite || app.job.rewrite || "";
+  $("final-text").value = e.target.checked
+    ? (/\bmonday\b/i.test(base) ? base.replace(/\bmonday\b/i, "Friday") : base + " See you Friday.")
+    : base;
+  renderDiff(); clearTimeout(editTimer); checkEdited();
+});
+
+const MODE_CYCLE = ["minimal", "natural", "presenter"];
+$("another").addEventListener("click", async () => {
+  if (!app.job) { $("record").focus(); setStatus("Record something first, then try another mode."); return; }
+  const used = app.job.mode_used;
+  const chosen = currentMode();
+  const next = chosen !== "auto" && chosen !== used ? chosen : MODE_CYCLE[(MODE_CYCLE.indexOf(used) + 1) % MODE_CYCLE.length];
+  setMode(next);
+  clearError(); app.checking = true; syncSpeakButton();
+  setStatus("Re-editing in " + next + " mode…");
+  try {
+    let res;
+    if (app.mock) { await sleep(700); res = mockMode(next); }
+    else res = await api("/api/rewrite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: app.job.id, mode: next }) });
+    Object.assign(app.job, res);
+    app.job.mode_used = next;
+    app.baseRewrite = app.job.rewrite;
+    $("bad").checked = false;
+    app.checking = false;
+    renderJob(app.job, true);
+  } catch (e) { app.checking = false; showError(e.message, e.hint); }
+  syncSpeakButton();
+});
+function mockMode(mode) {
+  const t = { minimal: "The team meeting is on Monday at five p m. And everyone should bring their laptops.", natural: "The team meeting is on Monday at five p m. Everyone should bring their laptops.", presenter: "Team meeting: Monday, five p m. Please bring your laptops." }[mode];
+  return { rewrite: t, guard: mockGuard(t), edits: app.job.edits, mode_used: mode };
+}
+
+$("copy").addEventListener("click", async () => {
+  const t = $("final-text").value;
+  try { await navigator.clipboard.writeText(t); }
+  catch { $("final-text").select(); document.execCommand("copy"); }
+  $("copy-note").textContent = "Copied.";
+  setTimeout(() => { $("copy-note").textContent = ""; }, 2000);
+});
+
+// ---------- speaking + chained playback ----------
+const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+const player = $("player");
+let orig = null, playId = 0;
+
+function stopPlayback() {
+  playId++;
+  player.pause(); player.removeAttribute("src"); player.load();
+  if (orig) { orig.pause(); orig = null; }
+}
+
+$("original").addEventListener("click", () => {
+  if (!app.blob) return;
+  stopPlayback();
+  orig = new Audio(URL.createObjectURL(app.blob));
+  orig.play().catch(() => setStatus("Your browser couldn't play the original recording."));
+  setStatus("Playing your original recording.");
+});
+
+function toneWav(seconds, freq = 440, rate = 16000) {
+  const n = Math.floor(seconds * rate), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.sin((2 * Math.PI * freq * i) / rate) * 3000 * Math.min(1, i / 800, (n - i) / 800), true);
+  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+}
+
+$("speak").addEventListener("click", async () => {
+  if ($("speak").disabled) return;
+  // Prime the audio element inside the click so later play() calls are allowed.
+  stopPlayback();
+  player.src = SILENT; player.play().catch(() => {});
+  clearError();
+  const text = finalText();
+  setState("speaking"); syncSpeakButton();
+  setStatus("Generating your voice. This can take up to 20 seconds…");
+  $("output").hidden = false; $("out-meta").textContent = ""; $("downloads").replaceChildren(); $("play-state").textContent = "";
+  try {
+    let res;
+    if (app.mock) { await sleep(1500); res = { chunks: [{ url: toneWav(1.6, 440), seconds: 1.6, cached: false }, { url: toneWav(1.6, 554), seconds: 1.6, cached: false }], total_seconds: 3.2, ms: 1500 }; }
+    else res = await api("/api/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: app.job.id, text }) });
+    if (!res.chunks && res.speak_id) res = await pollSpeak(res.speak_id);
+    showAudio(res);
+  } catch (e) {
+    $("output").hidden = true;
+    if (e.code === "twinly_offline" || e.code === "voice_not_set_up") {
+      app.twinlyOnline = false; document.body.dataset.twinly = "offline";
+      showError(e.message, (e.hint || "") + " Your cleaned-up text is still here to copy.", "twinly-offline");
+    } else if (e.code === "job_unverified") {
+      showError(e.message, (e.hint || "Twinly couldn't verify the job.") + " We won't retry this automatically to protect your credit.");
+    } else showError(e.message || "Couldn't generate audio.", e.hint);
+  }
+  if (document.body.dataset.state === "speaking") setState("ready");
+  syncSpeakButton();
+});
+
+async function pollSpeak(id) {
+  for (let i = 0; i < 75; i++) { // up to ~60 s
+    await sleep(800);
+    const r = await api("/api/speak/" + encodeURIComponent(id));
+    if (r.chunks) return r;
+    if (r.error) throw r.error;
+  }
+  throw { code: "internal", message: "Generating audio is taking too long.", hint: "Try again in a minute." };
+}
+
+function showAudio(res) {
+  const chunks = res.chunks || [];
+  $("out-meta").textContent = chunks.length + (chunks.length === 1 ? " part" : " parts") + ", " + (res.total_seconds || 0).toFixed(1) + " s of audio" + (res.ms ? ", generated in " + fmtMs(res.ms) : "") + (chunks.every((c) => c.cached) && chunks.length ? " (from cache)" : "");
+  const dl = $("downloads"); dl.replaceChildren();
+  chunks.forEach((c, i) => dl.append(el("a", { class: "btn", href: c.url, download: "voiceflow-" + (i + 1) + ".m4a", text: chunks.length > 1 ? "Download part " + (i + 1) : "Download audio" })));
+  playChain(chunks);
+}
+
+function playChain(chunks) {
+  const my = ++playId;
+  let i = 0;
+  const go = () => {
+    if (my !== playId) return;
+    if (i >= chunks.length) { setState("ready"); $("play-state").textContent = "Finished."; setStatus("Finished playing."); syncSpeakButton(); return; }
+    player.src = chunks[i].url;
+    if (chunks[i + 1]) { const warm = new Audio(); warm.preload = "auto"; warm.src = chunks[i + 1].url; } // preload next
+    $("play-state").textContent = "Playing part " + (i + 1) + " of " + chunks.length + "…";
+    setStatus($("play-state").textContent);
+    setState("playing");
+    player.play().catch(() => { $("play-state").textContent = "Press play on the audio bar to listen."; setState("ready"); });
+    i++;
+  };
+  player.onended = go;
+  go();
+}
+
 // ---- wiring ----
 $("record").addEventListener("click", toggleRecord);
 $("demo").addEventListener("click", useDemoClip);

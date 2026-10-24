@@ -124,3 +124,4 @@ footer { padding-top: 2rem; padding-bottom: 2rem; color: var(--muted); font-size
 footer p { margin: .3rem 0; }
 
 body[data-state="recording"] #stages, body[data-state="idle"] #stages { opacity: .85; }
+[hidden] { display: none !important; }
