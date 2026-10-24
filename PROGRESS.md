@@ -32,6 +32,14 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] 5  eval/utterances.json (8 cases) + eval/run_eval.py, `--offline` works (2026-10-23 23:53)
 - [ ] 4  verified on real APIs (needs: Twinly "Build my clone"; OpenAI credits) then re-run G1/G2 once each
 
+### T2 Round 2
+- [x] R2-1 voice_starting-in-200-job fix committed + tests (2026-10-24 00:35)
+- [ ] R2-2 G1 real audio: BLOCKED, voice engine `voice_starting` (2 real POSTs used, 3 left); user must quit+reopen Twinly. Raw capture saved; retry loop now fits the 60 s cap (2026-10-24 00:45)
+- [ ] R2-3 G2 real Decisions: BLOCKED, still 429 no credits; added `decide.health()` real probe (2026-10-24 00:46)
+- [x] R2-4 guard vs realistic rewrites: 61-case corpus, FP 4/37 -> 0/36, FN 5/30 -> 3/31 (n=67) (2026-10-24 00:48)
+- [x] R2-5 deadlines: analyze 15 s, verify 10 s, guard never raises; voice-identity cache + spend-cap tests (2026-10-24 00:46)
+- [ ] R2-6 eval/RESULTS.md from a real run (running)
+
 ## T3 frontend
 - [x] 1  frontend/ skeleton (index.html, app.js, style) + record/mode/terms/demo (2026-10-23, offline mock toggle; real server not yet tried)
 - [x] T3-cp2 stage timeline, SSE + 800 ms polling fallback (2026-10-23)
