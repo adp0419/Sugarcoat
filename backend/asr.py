@@ -4,6 +4,7 @@ CLI: python -m backend.asr path/to/audio
 """
 import asyncio
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from pathlib import Path
 from .config import settings
 from .errors import api_error
 from .models import ASRResult, Word
+
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")  # must be set before torch loads
 
 log = logging.getLogger("voiceflow.asr")
 
@@ -50,7 +53,13 @@ def _load_sync():
     from crisperwhisper import CrisperWhisperModel
 
     t = time.time()
-    _model = CrisperWhisperModel(settings.ASR_SIZE)
+    import torch
+
+    # Measured 2026-10-23 on M-series: MPS+float16 transcribes the 9 s canonical clip in ~3 s (CPU "auto" was minutes).
+    if torch.backends.mps.is_available():
+        _model = CrisperWhisperModel(settings.ASR_SIZE, device="mps", compute_type="float16")
+    else:
+        _model = CrisperWhisperModel(settings.ASR_SIZE)
     log.info("CrisperWhisper(%s) loaded in %.1fs", settings.ASR_SIZE, time.time() - t)
 
 
@@ -97,10 +106,18 @@ def _repeated_ngrams(text: str, n: int = 3) -> bool:
     return False
 
 
+_TAG = re.compile(r"\[([A-Za-z]+)\]")
+
+
+def clean_tags(text: str) -> str:
+    """CrisperWhisper marks disfluencies as "[UM]" / "[UH]"; normalise to plain lowercase "um" / "uh"."""
+    return _TAG.sub(lambda m: m.group(1).lower(), text)
+
+
 def _transcribe_sync(wav: Path) -> ASRResult:
     r = _model.transcribe(str(wav), language="en", mode="verbatim", word_timestamps=True)
-    words = [Word(w=w.word, start=w.start or 0.0, end=w.end or 0.0) for w in (r.words or [])]
-    return ASRResult(text=(r.text or "").strip(), words=words, seconds=float(r.duration or 0.0))
+    words = [Word(w=clean_tags(w.word), start=w.start or 0.0, end=w.end or 0.0) for w in (r.words or [])]
+    return ASRResult(text=clean_tags(r.text or "").strip(), words=words, seconds=float(r.duration or 0.0))
 
 
 async def transcribe(wav: Path) -> ASRResult:

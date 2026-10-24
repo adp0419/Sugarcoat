@@ -10,3 +10,4 @@ pytest==9.1.1
 numpy==2.5.4
 # CrisperWhisper weights are NOT bundled (Nyra non-commercial research licence); downloaded from HuggingFace on first run.
 crisperwhisper[transformers]==2.0.3
+transformers<5  # 5.x breaks crisperwhisper 2.0.3 word-timestamp generation (EncoderDecoderCache.layers)
