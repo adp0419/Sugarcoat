@@ -41,6 +41,10 @@ HEALTH_TTL_S = 30.0
 _TERMINAL_FAIL = {"failed", "canceled", "expired"}
 
 
+class _VoiceStarting(Exception):
+    """Twinly's voice engine is still warming up; the speak job should be re-posted."""
+
+
 def _find(obj: Any, key: str):
     """First value stored under ``key`` anywhere in a JSON-ish structure."""
     if isinstance(obj, dict):
@@ -236,6 +240,8 @@ class TwinlyClient:
             status = str(_find(data, "status") or "").lower()
             if status in _TERMINAL_FAIL:
                 code = str(_find(data, "code") or "")
+                if code == "voice_starting":  # arrives inside a 200 job body, not as an HTTP error
+                    raise _VoiceStarting()
                 raise self._raise_for(resp, code or "voice_failed")
             if status == "needs_approval":
                 raise api_error("internal", "Twinly is waiting for approval on the Mac.",
@@ -264,8 +270,16 @@ class TwinlyClient:
             self.in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self.in_flight)
             try:
-                first = await self._post_speak(text)
-                data = await self._await_job(first)
+                for attempt in range(4):  # docs/md/04: voice_starting -> wait 5 s, retry up to 3x
+                    first = await self._post_speak(text)
+                    try:
+                        data = await self._await_job(first)
+                        break
+                    except _VoiceStarting:
+                        if attempt == 3:
+                            raise api_error("internal", "Twinly voice is still starting.",
+                                            "Quit and reopen the Twinly app so its voice engine starts, then retry.")
+                        await self.sleep(5)
             finally:
                 self.in_flight -= 1
         b64 = _find(data, "audio_b64")

@@ -237,3 +237,21 @@ def test_real_shape_http200_failed_job_voice_not_set_up(tmp_path):
     with pytest.raises(ApiError) as e:
         run(make(tmp_path, f).speak("Hello, this is a test."))
     assert e.value.code == "voice_not_set_up" and f.post_calls == 1 and f.get_calls == 0
+
+
+def test_voice_starting_inside_200_failed_job_reposts_then_succeeds(tmp_path):
+    starting = {"id": "j", "object": "job", "status": "failed", "result": None,
+                "error": {"code": "voice_starting", "message": "Voice engine is starting."}}
+    f = Fake(posts=[(200, starting), (200, starting), (200, DONE)])
+    c = make(tmp_path, f)
+    res = run(c.speak("Hello, this is a test."))
+    assert f.post_calls == 3 and c.sleeps.count(5) == 2 and res.chunks[0].seconds == 2.5
+
+
+def test_voice_starting_forever_gives_up_after_four_posts(tmp_path):
+    starting = {"id": "j", "status": "failed", "error": {"code": "voice_starting"}}
+    f = Fake(posts=[(200, starting)])
+    c = make(tmp_path, f)
+    with pytest.raises(ApiError) as e:
+        run(c.speak("Hi."))
+    assert f.post_calls == 4 and "reopen the Twinly app" in e.value.hint
