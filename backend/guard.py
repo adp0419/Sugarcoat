@@ -559,9 +559,9 @@ async def check(verbatim: str, rewrite: str, mode: str = "natural",
     from . import decide
 
     async def verifier():
-        try:
-            return await decide.verify(verbatim, rewrite)
-        except Exception as e:  # verifier trouble must never break the guard
+        try:  # decide.verify has its own 10 s deadline; this is a belt-and-braces cap
+            return await asyncio.wait_for(decide.verify(verbatim, rewrite), decide.VERIFY_DEADLINE_S + 1)
+        except Exception as e:  # verifier trouble (incl. timeout) must never break the guard
             return decide.Verification(False, note=f"{type(e).__name__}")
 
     det, ver = await asyncio.gather(asyncio.to_thread(check_rules, verbatim, rewrite, mode, protected), verifier())

@@ -176,3 +176,60 @@ def test_verify_unavailable_on_quota(monkeypatch):
     serve(monkeypatch, lambda r: httpx.Response(429, json={"error": {"code": "credit_balance_exhausted"}}))
     v = run(decide.verify("a", "b"))
     assert v.available is False and not v.ok
+
+
+# ---- hard deadlines (round 2) ---------------------------------------------
+def _slow(seconds):
+    async def handler(req):
+        await asyncio.sleep(seconds)
+        return answers_for(req, {"meaning_preserved": 0.99})
+    return handler
+
+
+def test_analyze_hard_deadline_degrades(monkeypatch):
+    import time
+
+    monkeypatch.setattr(decide, "ANALYZE_DEADLINE_S", 0.2)
+    serve(monkeypatch, _slow(5))
+    t = time.perf_counter()
+    d = run(decide.analyze(CANON, [CANON]))
+    assert time.perf_counter() - t < 1.0
+    assert d.available is False and "timed out" in d.note
+
+
+def test_verify_hard_deadline_degrades(monkeypatch):
+    import time
+
+    monkeypatch.setattr(decide, "VERIFY_DEADLINE_S", 0.2)
+    serve(monkeypatch, _slow(5))
+    t = time.perf_counter()
+    v = run(decide.verify("a", "b"))
+    assert time.perf_counter() - t < 1.0 and v.available is False and "timed out" in v.note
+
+
+def test_guard_goes_offline_when_verifier_hangs(monkeypatch):
+    import time
+
+    from backend import guard
+
+    monkeypatch.setattr(decide, "VERIFY_DEADLINE_S", 0.2)
+    serve(monkeypatch, _slow(5))
+    t = time.perf_counter()
+    res = run(guard.check("meet Monday at 5 pm", "Meet Monday at 5 PM."))
+    assert time.perf_counter() - t < 1.5
+    assert res.pass_ and res.verifier == "offline"
+
+
+def test_analyze_never_raises_on_garbage(monkeypatch):
+    serve(monkeypatch, lambda r: httpx.Response(200, content=b"not json"))
+    assert run(decide.analyze(CANON, [CANON])).available is False
+
+
+def test_health_reports_quota_error(monkeypatch):
+    monkeypatch.setattr(decide, "_health_cache", None)
+    serve(monkeypatch, lambda r: httpx.Response(429, json={"error": {"code": "credit_balance_exhausted"}}))
+    state, why = run(decide.health())
+    assert state == "error" and "credit" in why
+    monkeypatch.setattr(decide, "_health_cache", None)
+    serve(monkeypatch, lambda r: answers_for(r))
+    assert run(decide.health())[0] == "ok"

@@ -27,6 +27,8 @@ URL = "https://api.openai.com/v1/decisions"
 TIMEOUT_S = 15.0
 RETRIES = 2
 MAX_SENTENCES = 8
+ANALYZE_DEADLINE_S = 15.0  # whole pass 1 (main call + per-sentence calls + retries)
+VERIFY_DEADLINE_S = 10.0   # whole pass 2
 KEEP_BELOW = 0.25      # needs_edit probability under this => leave the sentence unchanged
 ISSUE_AT = 0.5
 
@@ -97,13 +99,13 @@ def _err_info(r: httpx.Response) -> tuple[str, str]:
         return "", r.text[:200]
 
 
-async def _call(input_: str, questions: list[dict]) -> list[dict]:
+async def _call(input_: str, questions: list[dict], retries: int = RETRIES) -> list[dict]:
     """POST /v1/decisions and return the ``answers`` list. Only function that knows the wire format."""
     body = {"model": settings.DECISIONS_MODEL, "input": input_, "questions": questions}
     headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY.strip()}"}
     last: Exception | None = None
     async with httpx.AsyncClient(transport=_transport, timeout=TIMEOUT_S) as http:
-        for attempt in range(RETRIES + 1):
+        for attempt in range(retries + 1):
             try:
                 r = await http.post(URL, json=body, headers=headers)
             except httpx.HTTPError as e:
@@ -123,7 +125,7 @@ async def _call(input_: str, questions: list[dict]) -> list[dict]:
                 last = DecisionsUnavailable(f"{r.status_code} {code}".strip())
                 if r.status_code == 429 or r.status_code >= 500:
                     pass  # transient: back off and retry
-            if attempt < RETRIES:
+            if attempt < retries:
                 await _sleep(2.0)
     raise last or DecisionsUnavailable("unknown error")
 
@@ -194,8 +196,18 @@ async def _sentence_pass(i: int, s: str) -> SentenceDecision:
 
 
 async def analyze(verbatim: str, sentences: list[str]) -> Decisions:
-    """Pass 1. Never raises for API trouble: returns ``Decisions(available=False, ...)``."""
+    """Pass 1. Never raises for API trouble: returns ``Decisions(available=False, ...)``.
+    Hard deadline ANALYZE_DEADLINE_S for the whole pass, retries included."""
     sents = split_for_decisions(sentences) or [verbatim]
+    try:
+        return await asyncio.wait_for(_analyze(verbatim, sents), ANALYZE_DEADLINE_S)
+    except asyncio.TimeoutError:
+        return _unavailable(sents, f"timed out after {ANALYZE_DEADLINE_S:g} s")
+    except Exception as e:  # never break the pipeline over the analysis pass
+        return _unavailable(sents, f"{type(e).__name__}")
+
+
+async def _analyze(verbatim: str, sents: list[str]) -> Decisions:
     if not _enabled():
         why = "DECISIONS_ENABLED=0" if not settings.DECISIONS_ENABLED else "no OPENAI_API_KEY"
         return _unavailable(sents, why)
@@ -242,7 +254,17 @@ class Verification:
 
 
 async def verify(original: str, rewrite: str) -> Verification:
-    """Pass 2: ask Decisions whether ``rewrite`` kept the meaning of ``original``."""
+    """Pass 2: ask Decisions whether ``rewrite`` kept the meaning of ``original``.
+    Hard deadline VERIFY_DEADLINE_S; on timeout or any error -> available=False (guard goes offline)."""
+    try:
+        return await asyncio.wait_for(_verify(original, rewrite), VERIFY_DEADLINE_S)
+    except asyncio.TimeoutError:
+        return Verification(False, note=f"timed out after {VERIFY_DEADLINE_S:g} s")
+    except Exception as e:
+        return Verification(False, note=f"{type(e).__name__}")
+
+
+async def _verify(original: str, rewrite: str) -> Verification:
     if not _enabled():
         return Verification(False, note="Decisions disabled")
     payload = json.dumps({"original": original, "rewrite": rewrite}, ensure_ascii=False)
@@ -254,6 +276,32 @@ async def verify(original: str, rewrite: str) -> Verification:
     if "meaning_preserved" not in probs:
         return Verification(False, probs, note="verifier returned no meaning_preserved answer")
     return Verification(True, probs)
+
+
+_health_cache: tuple[float, str, str] | None = None
+HEALTH_TTL_S = 60.0
+
+
+async def health() -> tuple[str, str]:
+    """("ok"|"off"|"error", reason). Makes one tiny real call (1 predicate, ~10 tokens, ~$0.000001),
+    because a key being present says nothing about credits (we saw 429 credit_balance_exhausted)."""
+    global _health_cache
+    import time
+
+    if not settings.DECISIONS_ENABLED:
+        return "off", "DECISIONS_ENABLED=0"
+    if not settings.OPENAI_API_KEY.strip():
+        return "error", "no OPENAI_API_KEY"
+    now = time.monotonic()
+    if _health_cache and now - _health_cache[0] < HEALTH_TTL_S:
+        return _health_cache[1], _health_cache[2]
+    try:
+        await _call("ok", [_pred("is_word", "Is the input a word?")], retries=0)
+        res = ("ok", "")
+    except DecisionsUnavailable as e:
+        res = ("error", str(e))
+    _health_cache = (now, *res)
+    return res
 
 
 def main(argv: list[str] | None = None) -> int:

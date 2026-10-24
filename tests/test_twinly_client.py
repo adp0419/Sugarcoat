@@ -275,3 +275,19 @@ def test_slow_voice_starting_does_not_repost_past_budget(tmp_path):
     with pytest.raises(ApiError) as e:
         run(c.speak("Hello, this is a test."))
     assert calls.count("POST") == 1 and "reopen the Twinly app" in e.value.hint
+
+
+def test_other_key_never_plays_cached_audio_of_another_voice(tmp_path):
+    fa, fb = Fake(posts=[(200, DONE)]), Fake(posts=[(200, DONE)])
+    a = voice.TwinlyClient("twk_live_alice", "https://t/v1", tmp_path, transport=httpx.MockTransport(fa))
+    b = voice.TwinlyClient("twk_live_bob", "https://t/v1", tmp_path, transport=httpx.MockTransport(fb))
+    ra = run(a.speak("Same words."))
+    rb = run(b.speak("Same words."))
+    assert fb.post_calls == 1 and rb.chunks[0].cached is False   # B rendered its own voice
+    assert ra.chunks[0].url != rb.chunks[0].url
+    assert run(a.speak("Same words.")).chunks[0].url == ra.chunks[0].url  # A still hits its own cache
+
+
+def test_voice_id_does_not_leak_key(tmp_path):
+    c = voice.TwinlyClient("twk_live_secretsecret", "https://t/v1", tmp_path)
+    assert "secret" not in c.voice_id and len(c.voice_id) < 20
