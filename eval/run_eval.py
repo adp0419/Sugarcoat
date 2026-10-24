@@ -72,7 +72,7 @@ async def pipeline(item: dict, mode: str, dec, offline: bool) -> dict:
                 break
             violations = [v.message for v in g.violations]
     if rung == "original":
-        cand = rw.minimal(text).rewrite
+        cand = rw.minimal(text, mode).rewrite  # same call as main.run_ladder (self-corrections in natural/presenter)
         if cand.strip():
             g2 = await try_guard(cand)
             if g2.pass_:

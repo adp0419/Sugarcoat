@@ -1,0 +1,482 @@
+[
+  {
+    "id": "canonical",
+    "mode": "minimal",
+    "rung": "original",
+    "rewrite": "So, um, I just wanted to, uh, announce that we're going to have our meeting on Friday\u2014actually, sorry, Monday, at 5 PM, and, um, everyone should be there.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 28,
+    "words_out": 28,
+    "fillers_in": 3,
+    "fillers_out": 3,
+    "ms": 426,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": false,
+    "decisions": "off"
+  },
+  {
+    "id": "canonical",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "So I just wanted to announce that we're going to have our meeting on Monday, at 5 PM, and everyone should be there.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 28,
+    "words_out": 23,
+    "fillers_in": 3,
+    "fillers_out": 0,
+    "ms": 277,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "canonical",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "So I just wanted to announce that we're going to have our meeting on Monday, at 5 PM, and everyone should be there.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 28,
+    "words_out": 23,
+    "fillers_in": 3,
+    "fillers_out": 0,
+    "ms": 282,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "hedges",
+    "mode": "minimal",
+    "rung": "minimal",
+    "rewrite": "I think we might meet around five on Wednesday, maybe.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 12,
+    "words_out": 10,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 277,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "hedges",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "I think we might meet around five on Wednesday, maybe.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 12,
+    "words_out": 10,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 254,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "hedges",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "I think we might meet around five on Wednesday, maybe.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 12,
+    "words_out": 10,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 253,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "negations",
+    "mode": "minimal",
+    "rung": "minimal",
+    "rewrite": "So we're not meeting on Thursday, we're, we're meeting on Friday instead, and nobody should bring food.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 18,
+    "words_out": 17,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 277,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "negations",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "So we're not meeting on Thursday, we're, we're meeting on Friday instead, and nobody should bring food.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 18,
+    "words_out": 17,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 248,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "negations",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "So we're not meeting on Thursday, we're, we're meeting on Friday instead, and nobody should bring food.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 18,
+    "words_out": 17,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 244,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "numbers_heavy",
+    "mode": "minimal",
+    "rung": "minimal",
+    "rewrite": "Flight 482 leaves gate 17 at 6:45, and the boarding group is 3.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 16,
+    "words_out": 13,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 269,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "numbers_heavy",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "Flight 482 leaves gate 17 at 6:45, and the boarding group is 3.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 16,
+    "words_out": 13,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 321,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "numbers_heavy",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "Flight 482 leaves gate 17 at 6:45, and the boarding group is 3.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 16,
+    "words_out": 13,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 249,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "already_fluent",
+    "mode": "minimal",
+    "rung": "minimal",
+    "rewrite": "The quarterly report is due on Friday at noon.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 9,
+    "words_out": 9,
+    "fillers_in": 0,
+    "fillers_out": 0,
+    "ms": 281,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "already_fluent",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "The quarterly report is due on Friday at noon.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 9,
+    "words_out": 9,
+    "fillers_in": 0,
+    "fillers_out": 0,
+    "ms": 280,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "already_fluent",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "The quarterly report is due on Friday at noon.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 9,
+    "words_out": 9,
+    "fillers_in": 0,
+    "fillers_out": 0,
+    "ms": 256,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "number_self_correction",
+    "mode": "minimal",
+    "rung": "original",
+    "rewrite": "We need, um, ten, no wait, twelve chairs for the 3 PM, actually 4 PM session.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 16,
+    "words_out": 16,
+    "fillers_in": 1,
+    "fillers_out": 1,
+    "ms": 265,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": false,
+    "decisions": "off"
+  },
+  {
+    "id": "number_self_correction",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "We need twelve chairs for the 4 PM session.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 16,
+    "words_out": 9,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 286,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "number_self_correction",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "We need twelve chairs for the 4 PM session.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 16,
+    "words_out": 9,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 233,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "stutter_false_start",
+    "mode": "minimal",
+    "rung": "minimal",
+    "rewrite": "I want to I want to tell everyone that the deadline moved to April 5th.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 18,
+    "words_out": 15,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 252,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "stutter_false_start",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "I want to I want to tell everyone that the deadline moved to April 5th.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 18,
+    "words_out": 15,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 261,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "stutter_false_start",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "I want to I want to tell everyone that the deadline moved to April 5th.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 18,
+    "words_out": 15,
+    "fillers_in": 1,
+    "fillers_out": 0,
+    "ms": 255,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "names_quantifiers",
+    "mode": "minimal",
+    "rung": "minimal",
+    "rewrite": "Hey everyone Sarah and Priya will present on Tuesday. Some of you should bring laptops, but not everyone needs one.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 22,
+    "words_out": 20,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 240,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "names_quantifiers",
+    "mode": "natural",
+    "rung": "minimal",
+    "rewrite": "Hey everyone Sarah and Priya will present on Tuesday. Some of you should bring laptops, but not everyone needs one.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 22,
+    "words_out": 20,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 255,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  },
+  {
+    "id": "names_quantifiers",
+    "mode": "presenter",
+    "rung": "minimal",
+    "rewrite": "Hey everyone Sarah and Priya will present on Tuesday. Some of you should bring laptops, but not everyone needs one.",
+    "guard": true,
+    "verifier": "offline",
+    "violations": [],
+    "words_in": 22,
+    "words_out": 20,
+    "fillers_in": 2,
+    "fillers_out": 0,
+    "ms": 258,
+    "errors": [
+      "GemmaUnavailable: Gemini key has no credits (402) - add billing in AI Studio"
+    ],
+    "keep_ok": true,
+    "drop_ok": true,
+    "decisions": "off"
+  }
+]

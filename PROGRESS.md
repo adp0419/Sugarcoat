@@ -48,12 +48,12 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] R2-5 deadlines: analyze 15 s, verify 10 s, guard never raises; voice-identity cache + spend-cap tests (2026-10-24 00:46)
 - [ ] R2-6 eval/RESULTS.md from a real run (running)
 
-### T2 Round 3 (real-call budget: 15 lines; used so far: 9)
+### T2 Round 3 (real-call budget: 15 lines for ALL terminals; used: 10 = 9 by T2 + 1 by another terminal at 10:33; 5 left. Check logs/spend.json before any SPEAK=1)
 - [x] R3-1 G1 DONE via /api/speak (MOCK=0, :8001): 1 chunk 68 chars 5.3 s; 3 chunks (507/529/134 chars) 28.6 s, in order (ASR-checked), 57 s audio; repeat = cache hit 10 ms, 0 spend; 3 concurrent requests (2 identical) = 2 lines, serialised; every file AAC 24 kHz mono (ffprobe). Render 4.2-14.1 s per chunk. fixtures/real_twinly_speak_ok.json (2026-10-24 10:33)
 - [x] R3-2 fixtures/backup_demo.m4a = canonical line in the owner's cloned voice (3.84 s, ASR: "Our meeting will take place on Monday at five PM. Everyone should attend."); MOCK /api/speak + /api/audio/backup_demo.m4a and voice MOCK cache copy both serve it (stale copies refreshed) (2026-10-24 10:35). For T1: mock.speak still says seconds=3.0 (real 3.84); fixtures/README.md still calls it a tone
 - [x] R3-3 voice.py from real runs: 2 concurrent jobs crash Twinly's MLX engine -> one at a time; voice_failed re-posted once; identical chunks share one render; render survives the 60 s cap (paid audio lands in cache); per-chunk latency log + redacted last ok/fail body in logs/ (+6 tests) (2026-10-24 10:40)
 - [x] R3-4 guard: 3 known FNs fixed (dropped phrase, added list item, reordered roles) + dropped condition + "let me rephrase" marker; 13 new held-out cases (before the condition rule: 0/8 FP, 2/5 FN); corpus n=80: FP 0/44, FN 1/36 (ho_role_swap); T1 self-correction tests pass check_rules (2026-10-24 10:45)
-- [ ] R3-5 eval/RESULTS.md (real pipeline, rung per output, guard corpus, Twinly latency)
+- [x] R3-5 eval/RESULTS.md: text eval n=24 on real keys (Gemma 402 + Decisions 429 -> every output from the deterministic rung: minimal 22, original 2), 3 real /api/process audio runs (ready, guard pass, 2.0-3.1 s), guard corpus n=80 FP 0/44 FN 1/36, Twinly latency table n=8 (2026-10-24 10:50). For T1: rewrite.minimal leaves phrase repeats ("I want to I want to"); trace marks decide ok + guard "deterministic+decisions" while both AI services are offline
 - [ ] R3-6 README, DIFFICULTIES, RUNBOOK, DEVPOST accurate to the final system
 - [ ] R3-7 release check + submission checklist in RUNBOOK
 
