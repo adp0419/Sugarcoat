@@ -83,8 +83,21 @@
 
     <div id="stage-setup" class="stage-setup">
       <p>Talk one sentence at a time. Each sentence is tidied, checked, and spoken in your voice a few seconds after you finish it, like a radio delay.</p>
+      <div class="devices">
+        <div class="field">
+          <label for="stage-in">Input: the microphone you talk into</label>
+          <select id="stage-in"><option value="">System default microphone</option></select>
+        </div>
+        <div class="field" id="stage-out-wrap">
+          <label for="stage-out">Output: where your voice plays</label>
+          <select id="stage-out"><option value="">System default speaker</option></select>
+        </div>
+        <p id="stage-out-note" class="help" hidden>This browser plays through the system output. Choose it in macOS Sound settings.</p>
+        <button id="stage-devices" class="link-btn" type="button" hidden>Show device names (asks for the microphone)</button>
+        <p class="help">Tip: on AirPods, use the Mac's microphone as input and AirPods as output. Using the AirPods mic drops them into low-quality call audio.</p>
+      </div>
       <label class="check-row"><input type="checkbox" id="stage-consent"><span>Speak each sentence in my voice as soon as it passes the meaning check. Sentences that fail are held for me to review.</span></label>
-      <label class="check-row"><input type="checkbox" id="stage-duplex"><span>I'm on headphones or the speaker is away from the mic: keep listening while my voice plays.</span></label>
+      <label class="check-row"><input type="checkbox" id="stage-duplex"><span>Keep listening while my voice plays (headphones, or a speaker away from the mic). Ticked automatically for headphones.</span></label>
       <button id="stage-start" class="btn btn-primary btn-big" type="button" disabled aria-describedby="stage-start-help">
         <svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg>Start stage mode
       </button>
@@ -101,6 +114,7 @@
         <p class="stage-delay" title="Median time from the end of a sentence to hearing it">Delay <strong id="stage-delay">–</strong></p>
         <button id="stage-stop" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg><span id="stage-stop-label">Stop</span></button>
       </div>
+      <p id="stage-route" class="help"></p>
       <p id="stage-live" class="stage-live" aria-hidden="true"></p>
     </div>
 
