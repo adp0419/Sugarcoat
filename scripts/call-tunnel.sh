@@ -45,7 +45,8 @@ done
 curl -fs "http://localhost:$PORT/healthz" >/dev/null 2>&1 || { echo "Server did not become healthy." >&2; cat "$TMP/server.log" >&2; exit 1; }
 echo "Server up on http://localhost:$PORT (pid $SERVER_PID)"
 
-cloudflared tunnel --url "http://localhost:$PORT" >"$TMP/tunnel.log" 2>&1 &
+# HTTP/2 instead of QUIC: QUIC streams time out on idle Wi-Fi and drop the call for a few seconds.
+cloudflared tunnel --protocol http2 --url "http://localhost:$PORT" >"$TMP/tunnel.log" 2>&1 &
 TUNNEL_PID=$!
 
 URL=""

@@ -217,7 +217,7 @@ async function openStream() {
       connected = false; errorsInRow++;
       setConnection(everOpened ? 'Reconnecting…' : 'Connecting…', 'wait'); refresh();
       if (status === 403) setLinkError(describeFailure('', 'BAD_ORIGIN', 403));
-      else if (status >= 400) setLinkError('The call server rejected the connection. Reload the page, or ask for a new link.');
+      else if (status >= 400 && status < 500) setLinkError('The call server rejected the connection. Reload the page, or ask for a new link.');
       else if (errorsInRow >= 3) setLinkError('Can’t reach the call server. Check your connection. This page keeps trying.');
       await sleep(Math.min(8000, 1000 * 2 ** Math.min(errorsInRow - 1, 3)));
       continue;
