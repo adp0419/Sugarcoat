@@ -307,6 +307,38 @@ test('call routes honor tunnel headers only with TRUST_PROXY', async t => {
   assert.equal((await send(trusting, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   const plain = await fixture(t, {}, { synthesize: async ({ text }) => mp3(text) });
   assert.equal((await send(plain)).status, 403);
+  const stale = await fixture(t, { trustProxy: true, origin: 'http://127.0.0.1:8000' }, { synthesize: async ({ text }) => mp3(text) });
+  await connect(t, stale, 'rohit');
+  assert.equal((await send(stale)).status, 200, 'a stale APP_ORIGIN must not block a tunnel');
+});
+
+test('long-poll delivers caption and clip to a peer that never opens SSE', async t => {
+  const f = await fixture(t, {}, { synthesize: async ({ text }) => mp3(text) });
+  const poll = (as, after, signal) => fetch(f.url('/api/call/poll', as) + (after == null ? '' : `&after=${after}`), { signal }).then(r => r.json());
+  const first = await poll('rohit');
+  assert.deepEqual(first.events, []);
+  assert.equal(first.you, 'rohit');
+  const aryan = await connect(t, f, 'aryan');
+  assert.equal(aryan.events[0].data.peerOnline, true, 'a polling peer counts as online');
+  const pending = poll('rohit', first.cursor);
+  assert.equal(await Promise.race([pending.then(() => 'answered'), delay(200, 'held')]), 'held');
+  const reply = await f.speak('aryan');
+  assert.equal(reply.status, 200); await reply.text();
+  let seen = [], cursor = first.cursor;
+  while (!seen.some(e => e.event === 'clip')) {
+    const body = await (seen.length ? poll('rohit', cursor) : pending);
+    assert.equal(body.peerOnline, true);
+    seen.push(...body.events); cursor = body.cursor;
+  }
+  assert.deepEqual(seen.map(e => e.event), ['caption', 'clip']);
+  assert.equal(seen[0].data.text, MOCK_CLEANED);
+  assert.ok(seen.every(e => e.id > first.cursor));
+  const clip = await fetch(`${f.base}${seen[1].data.url}?t=${TOKEN}`);
+  assert.equal(clip.status, 200);
+  const again = await poll('rohit', seen[0].id);
+  assert.deepEqual(again.events.map(e => e.event), ['clip'], 'only events after the cursor are returned');
+  const future = await poll('rohit', 10_000);
+  assert.deepEqual(future.events, [], 'a cursor from an earlier server run resyncs instead of hanging');
 });
 
 test('SSE sends a :ping comment on the heartbeat interval', async t => {

@@ -29,6 +29,7 @@
     </div>
 
     <div class="frame">
+      <div class="controls">
       <section class="session" aria-labelledby="sessionLabel">
         <div class="section-heading">
           <h2 id="sessionLabel">Call</h2>
@@ -51,14 +52,6 @@
         </div>
       </section>
 
-      <section class="conversation" aria-labelledby="logLabel">
-        <div class="section-heading">
-          <h2 id="logLabel">Conversation</h2>
-          <span id="logState" class="state-label">No messages yet</span>
-        </div>
-        <ol id="log" class="log" role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="logLabel" tabindex="0"></ol>
-        <p id="logEmpty" class="hint log-empty">Cleaned text from both of you appears here.</p>
-      </section>
 
       <section class="turn-control" aria-labelledby="turnLabel">
         <div class="section-heading">
@@ -86,6 +79,16 @@
             </div>
           </details>
         </div>
+      </section>
+      </div>
+
+      <section class="conversation chat" aria-labelledby="logLabel">
+        <div class="section-heading">
+          <h2 id="logLabel">Chat</h2>
+          <span id="logState" class="state-label">No messages yet</span>
+        </div>
+        <ol id="log" class="log" role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="logLabel" tabindex="0"></ol>
+        <p id="logEmpty" class="hint log-empty">What you both say shows up here as it happens.</p>
       </section>
     </div>
 

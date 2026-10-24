@@ -1,7 +1,8 @@
 /* Call page rules. Builds on /style.css tokens and components; nothing there is changed. */
 .page-intro { padding: 40px 0 var(--space-4); }
-.frame { border: 1px solid var(--border); border-radius: var(--radius-container); }
-.frame > section + section { border-top: 1px solid var(--border); }
+.frame { display: grid; grid-template-columns: minmax(320px, 40%) minmax(0, 1fr); border: 1px solid var(--border); border-radius: var(--radius-container); }
+.controls { min-width: 0; border-right: 1px solid var(--border); }
+.controls > section + section { border-top: 1px solid var(--border); }
 .frame .section-heading { border-bottom: 1px solid var(--border); }
 .section-body { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
 .section-body > .hint, .section-body > p, .section-body > fieldset { margin: 0; }
@@ -34,19 +35,22 @@
 .error[hidden] { display: none; }
 #status[data-state="done"] { color: var(--success); }
 
-/* Conversation */
-.log { list-style: none; margin: 0; padding: 0; max-height: min(46vh, 420px); min-height: 0; overflow-y: auto; scrollbar-color: var(--control-border) var(--background); }
+/* Chat */
+.chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.log { flex: 1 1 0; display: flex; flex-direction: column; gap: 12px; list-style: none; margin: 0; padding: var(--space-4); min-height: 420px; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: var(--control-border) var(--background); }
 .log:empty { display: none; }
 .log:focus-visible { outline-offset: -4px; }
-.log-empty { padding: var(--space-4); }
+.log-empty { flex: 1; display: flex; align-items: center; justify-content: center; margin: 0; padding: var(--space-4); text-align: center; }
 .log:not(:empty) + .log-empty { display: none; }
-.turn { display: flex; flex-direction: column; gap: 2px; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
-.turn:last-child { border-bottom: 0; }
-.turn .said { font-size: 18px; line-height: 1.7; overflow-wrap: anywhere; }
-.turn .who { font-weight: 600; }
-.turn[data-who="peer"] .who { color: var(--foreground); }
-.turn[data-who="you"] .said { color: var(--muted); }
-.flag { font-size: 12px; line-height: 20px; color: var(--muted); }
+.turn { display: flex; flex-direction: column; gap: 4px; max-width: min(85%, 560px); padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px 12px 12px 4px; background: var(--surface); align-self: flex-start; }
+.turn[data-who="you"] { align-self: flex-end; border-radius: 12px 12px 4px 12px; border-color: color-mix(in srgb, var(--focus) 35%, var(--border)); background: color-mix(in srgb, var(--focus) 12%, var(--background)); }
+.turn .meta { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
+.turn .who { font-weight: 600; color: var(--foreground); }
+.turn .said { margin: 0; font-size: 17px; line-height: 1.6; overflow-wrap: anywhere; }
+.turn .said[data-pending="true"] { color: var(--muted); }
+.flag { font-size: 12px; line-height: 18px; color: var(--muted); }
+.turn[data-who="you"] .flag { text-align: right; }
+.flag:empty { display: none; }
 .flag[data-state="speaking"], .flag[data-state="heard"] { color: var(--success); }
 .flag[data-state="waiting"] { color: var(--warning); }
 .flag[data-state="failed"] { color: var(--error); }
@@ -62,13 +66,18 @@ select:disabled { color: var(--muted); border-color: var(--border); }
 select:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .devices-body .hint:empty { display: none; }
 
+@media (max-width: 899px) {
+  .frame { grid-template-columns: minmax(0, 1fr); }
+  .controls { border-right: 0; border-bottom: 1px solid var(--border); }
+  .log { flex: none; min-height: 240px; max-height: 60vh; }
+}
 @media (max-width: 959px) {
   .section-body { padding-left: var(--space-3); padding-right: var(--space-3); }
-  .turn { padding-left: var(--space-3); padding-right: var(--space-3); }
+  .log { padding-left: var(--space-3); padding-right: var(--space-3); }
   .log-empty { padding-left: var(--space-3); padding-right: var(--space-3); }
 }
 @media (max-width: 699px) {
   .page-intro { padding-top: var(--space-4); }
   .section-body { padding: var(--space-3); }
-  .turn .said { font-size: 18px; }
+  .turn { max-width: 92%; }
 }

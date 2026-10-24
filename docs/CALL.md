@@ -66,9 +66,7 @@ The speaker's. The server looks for `TWINLY_API_KEY_<NAME>` and falls back to `T
 | Aryan speaking | `TWINLY_API_KEY_ARYAN`, else `TWINLY_API_KEY` (Aryan's) |
 | Rohit speaking | `TWINLY_API_KEY_ROHIT`, else `TWINLY_API_KEY`, which is **Aryan's** key today |
 
-So today both voices go through Aryan's Twinly account: Aryan's Mac must be awake with Twinly open and Jobs on, and Rohit's voice is whichever clone `TWINLY_VOICE_ID` points to. 
-
-**[not verified]** Whether a per-person voice id exists in the relay; only per-person *keys* are in config. Check with the lead before promising Rohit his own voice.
+So today both voices go through Aryan's Twinly account: Aryan's Mac must be awake with Twinly open and Jobs on, and **both people speak in Aryan's cloned voice**. Twinly picks the voice from the API key (there is no voice id), so Rohit gets his own voice once `TWINLY_API_KEY_ROHIT` holds his key and his Mac is awake with Twinly open and Jobs on.
 
 To switch Rohit to his own key: put his key in `.env` as `TWINLY_API_KEY_ROHIT=...` on the server, restart `npm run call`, and make sure Rohit's Mac has Twinly open with Jobs enabled. Rohit sends the key to Aryan privately, never in the shared link.
 
@@ -124,11 +122,23 @@ python3 -m venv ~/call-e2e-venv
 
 It uses the installed Google Chrome (add `--chromium` for Playwright's bundled one; run `playwright install chromium` first). Chrome runs with `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream --mute-audio`, so nothing is played aloud. Set `CALL_E2E_SHOTS=1` to save screenshots. It expects the page elements `#join` and `#talk`.
 
+## Delivery: long-poll, not SSE
+
+A cloudflared quick tunnel (2026.10.3) holds an entire `text/event-stream` response until it closes, padding or not, so SSE events never reached the other Mac. The page therefore long-polls `GET /api/call/poll?as=&t=&after=<last id>`: the server answers at once when newer events exist, otherwise holds up to 25 s and returns `[]`. Each reply carries `peerOnline`, and a polling person counts as online. `/api/call/events` (SSE) still exists for local tools such as `call:sim`.
+
+Verified on 2026-10-24: `scripts/call-e2e.py` passes through a real quick tunnel in both directions (caption shown, clip played, marked Heard).
+
+### Troubleshooting: "text/audio never arrives"
+
+The server log prints one line per relay step:
+
+- `{"call":"publish","to":"rohit","event":"clip",...,"conns":N}`: the event was queued for that person.
+- `{"call":"clip-get","id":...,"status":200}`: the receiving page fetched the audio. If `publish` lines appear but no `clip-get`, the receiving page is not polling; reload it.
+- `{"call":"stream",...}`: an SSE client opened or closed.
+
 ## What is not verified
 
-- The real `cloudflared` quick tunnel: `scripts/call-tunnel.sh` was exercised only with a stand-in `cloudflared` script, because it is not installed on the dev Mac. URL parsing, token printing, and server shutdown when the tunnel exits were seen; the real tunnel's output format and SSE/streaming behaviour through it were not.
+
 - Anything with live providers (Groq, Google, Twinly) or a second physical Mac.
-- SSE staying open for a long call through the tunnel and across Wi-Fi changes.
-- Safari behaviour (autoplay rules, mic permission).
-- The browser smoke test `scripts/call-e2e.py` against the finished call page (see PROGRESS.md for what was run).
-- Per-person voice ids (see above).
+- Safari behaviour (autoplay rules, mic permission) on the real Macs.
+- A long call across Wi-Fi changes.

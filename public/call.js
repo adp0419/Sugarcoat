@@ -16,7 +16,7 @@ const pick = value => (value = String(value || '').toLowerCase()) in NAMES ? val
 
 let me = pick(params.get('as')) || pick(lsGet('vf-call-as'));
 let joined = false, connected = false, everOpened = false, errorsInRow = 0;
-let source, connectId = 0, retryTimer, probeAbort;
+let connectId = 0, pollAbort;
 let ctx, micStream, micPromise, micId = lsGet('vf-call-mic') || '', speakerId = lsGet('vf-call-speaker') || '';
 let rec = null, sending = false, pumping = false, currentSource, currentAudio, gateRelease;
 const turns = new Map();   // utterance id -> { id, who, entry, ... }
@@ -95,20 +95,37 @@ function refresh() {
 }
 
 /* ---------- Conversation ---------- */
+const log = $('log');
+const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+function countEntries() {
+  const count = log.children.length;
+  $('logState').textContent = count ? `${count} message${count === 1 ? '' : 's'}` : 'No messages yet';
+}
+// One chat bubble: name and time, the words, then a status chip.
 function addEntry(who, text, mark, markState) {
+  const follow = nearBottom();
   const li = document.createElement('li'); li.className = 'turn'; li.dataset.who = who;
-  const said = document.createElement('p'); said.className = 'said';
-  const label = document.createElement('span'); label.className = 'who'; label.textContent = `${who === 'you' ? 'You' : peerName()}: `;
-  said.append(label, document.createTextNode(text));
+  const meta = document.createElement('p'); meta.className = 'meta';
+  const label = document.createElement('span'); label.className = 'who'; label.textContent = who === 'you' ? 'You' : peerName();
+  const time = document.createElement('time'); const at = new Date();
+  time.dateTime = at.toISOString(); time.textContent = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  meta.append(label, time);
+  const said = document.createElement('p'); said.className = 'said'; said.textContent = text;
   const markEl = document.createElement('span'); markEl.className = 'flag';
-  li.append(said, markEl); $('log').append(li);
+  li.append(meta, said, markEl); log.append(li);
   const entry = { li, said, markEl };
   setMark(entry, mark, markState);
-  const count = $('log').children.length;
-  $('logState').textContent = `${count} message${count === 1 ? '' : 's'}`;
-  $('log').scrollTop = $('log').scrollHeight;
+  countEntries();
+  if (follow) log.scrollTop = log.scrollHeight;
   return entry;
 }
+function setText(entry, text, pending = false) {
+  if (!entry) return;
+  const follow = nearBottom();
+  entry.said.textContent = text; entry.said.dataset.pending = pending ? 'true' : 'false';
+  if (follow) log.scrollTop = log.scrollHeight;
+}
+function removeEntry(entry) { entry?.li.remove(); countEntries(); }
 function setMark(entry, text, state = '') {
   if (!entry) return;
   entry.markEl.textContent = text; entry.markEl.dataset.state = state;
@@ -170,7 +187,6 @@ async function listDevices() {
 }
 
 /* ---------- Connection ---------- */
-const eventsUrl = () => `/api/call/events?as=${encodeURIComponent(me)}&t=${encodeURIComponent(token)}`;
 const withToken = path => `${path}${path.includes('?') ? '&' : '?'}as=${encodeURIComponent(me)}&t=${encodeURIComponent(token)}`;
 
 function invalidLink() {
@@ -180,58 +196,48 @@ function invalidLink() {
   setLinkError(INVALID_LINK);
   teardownCall(); refresh(); setStatus('Join the call to talk');
 }
-function stopConnection() {
-  connectId++; clearTimeout(retryTimer); probeAbort?.abort();
-  source?.close(); source = null;
-}
-async function probeStatus() {
-  probeAbort = new AbortController();
-  try {
-    const response = await fetch(eventsUrl(), { signal: probeAbort.signal, cache: 'no-store' });
-    const status = response.status; probeAbort.abort(); return status;
-  } catch { return 0; }
-}
-function openStream() {
+function stopConnection() { connectId++; pollAbort?.abort(); pollAbort = null; }
+// Long-poll /api/call/poll instead of SSE: tunnels such as cloudflared quick
+// tunnels buffer an event stream until it closes, so nothing would arrive.
+const handlers = { caption: onCaption, clip: onClip, delivered: onDelivered, error: onRelayError };
+async function openStream() {
   const id = ++connectId;
-  const es = source = new EventSource(eventsUrl());
-  const on = (type, handler) => es.addEventListener(type, event => {
-    if (id !== connectId) return;
-    let data; try { data = JSON.parse(event.data); } catch { return; }
-    handler(data);
-  });
-  es.onopen = () => {
-    if (id !== connectId) return;
-    connected = true; everOpened = true; errorsInRow = 0; setLinkError('');
-    setConnection('Connected', 'ok'); refresh();
-  };
-  es.onerror = async () => {
-    if (id !== connectId) return;
-    connected = false; errorsInRow++;
-    setConnection(everOpened ? 'Reconnecting…' : 'Connecting…', 'wait'); refresh();
-    if (errorsInRow >= 3) setLinkError('Can’t reach the call server. Check your connection. This page keeps trying.');
-    if (es.readyState !== EventSource.CLOSED) return; // the browser is retrying by itself
-    es.close();
-    const status = await probeStatus();
-    if (id !== connectId) return;
+  let cursor = null;
+  while (joined && id === connectId) {
+    const abort = pollAbort = new AbortController(), timer = setTimeout(() => abort.abort(), 40000);
+    let body = null, status = 0;
+    try {
+      const response = await fetch(withToken(cursor == null ? '/api/call/poll' : `/api/call/poll?after=${cursor}`), { cache: 'no-store', signal: abort.signal });
+      status = response.status;
+      if (response.ok) body = await response.json();
+    } catch {} finally { clearTimeout(timer); }
+    if (!joined || id !== connectId) return;
     if (status === 401) { invalidLink(); return; }
-    if (status >= 400) setLinkError(status === 403 ? describeFailure('', 'BAD_ORIGIN', 403) : 'The call server rejected the connection. Reload the page, or ask for a new link.');
-    retryTimer = setTimeout(() => { if (joined && id === connectId) openStream(); }, Math.min(8000, 1000 * 2 ** Math.min(errorsInRow, 3)));
-  };
-  on('hello', data => {
-    if (data.you && pick(data.you) && pick(data.you) !== me) return;
-    setPresence(!!data.peerOnline); refresh();
-  });
-  on('presence', data => setPresence(!!data.online));
-  on('caption', onCaption);
-  on('clip', onClip);
-  on('delivered', onDelivered);
-  on('error', onRelayError);
+    if (!body) {
+      connected = false; errorsInRow++;
+      setConnection(everOpened ? 'Reconnecting…' : 'Connecting…', 'wait'); refresh();
+      if (status === 403) setLinkError(describeFailure('', 'BAD_ORIGIN', 403));
+      else if (status >= 400) setLinkError('The call server rejected the connection. Reload the page, or ask for a new link.');
+      else if (errorsInRow >= 3) setLinkError('Can’t reach the call server. Check your connection. This page keeps trying.');
+      await sleep(Math.min(8000, 1000 * 2 ** Math.min(errorsInRow - 1, 3)));
+      continue;
+    }
+    if (!connected) { connected = true; everOpened = true; setLinkError(''); setConnection('Connected', 'ok'); }
+    errorsInRow = 0;
+    setPresence(!!body.peerOnline);
+    for (const item of body.events || []) {
+      if (cursor != null && item.id <= cursor) continue;
+      try { handlers[item.event]?.(item.data); } catch (error) { console.error(error); }
+    }
+    if (Number.isFinite(body.cursor)) cursor = body.cursor;
+    refresh();
+  }
 }
 function join() {
   hideError(); setLinkError('');
   if (!me) { setLinkError('Choose Aryan or Rohit first.'); return; }
   if (!token) { setLinkError(INVALID_LINK); return; }
-  if (!window.EventSource || !window.AudioContext || !window.MediaRecorder) { setLinkError('This browser can’t run the call. Use current Chrome, Safari, or Firefox.'); return; }
+  if (!window.fetch || !window.AudioContext || !window.MediaRecorder) { setLinkError('This browser can’t run the call. Use current Chrome, Safari, or Firefox.'); return; }
   lsSet('vf-call-as', me);
   joined = true; everOpened = false; errorsInRow = 0;
   // Unlock audio inside this click so incoming clips can play later.
@@ -308,7 +314,8 @@ async function sendRecording(run, mimeType) {
   sending = true; setStatus('Cleaning', 'processing'); refresh();
   const abort = new AbortController(), timeout = setTimeout(() => abort.abort(), 120000);
   const sentId = ++sentCounter;
-  let entry = null, cleanedText = '', finished = false;
+  let entry = addEntry('you', '…', 'Transcribing', 'waiting'), cleanedText = '', finished = false;
+  setText(entry, '…', true);
   try {
     const response = await fetch(withToken('/api/call/speak'), { method: 'POST', headers: { 'Content-Type': mimeType }, body: blob, signal: abort.signal });
     if (!response.ok) {
@@ -319,10 +326,15 @@ async function sendRecording(run, mimeType) {
     let pending = '';
     const handle = line => {
       const event = JSON.parse(line);
-      if (event.type === 'status') setStatus(`Cleaning · ${event.stage}`, 'processing');
+      if (event.type === 'status') {
+        setStatus(`Cleaning · ${event.stage}`, 'processing');
+        const mark = { transcribing: 'Transcribing', cleaning: 'Cleaning', speaking: 'Making your voice', sent: 'Sending' }[event.stage];
+        if (entry && mark) setMark(entry, mark, 'waiting');
+      } else if (event.type === 'preview') { if (entry && event.text) setText(entry, String(event.text), true); }
       else if (event.type === 'cleaned') {
         cleanedText = String(event.text || '').trim();
-        if (cleanedText) { entry = addEntry('you', cleanedText, 'Cleaned', ''); entry.id = event.id ?? null; }
+        if (cleanedText) { setText(entry, cleanedText); entry.id = event.id ?? null; }
+        else { removeEntry(entry); entry = null; }
       } else if (event.type === 'error') throw Object.assign(new Error(event.error || ''), { code: event.code });
       else if (event.type === 'done') finished = true;
     };
@@ -348,7 +360,7 @@ async function sendRecording(run, mimeType) {
     const text = error.name === 'AbortError' ? 'The server took too long. Try a shorter message.'
       : network ? (navigator.onLine === false ? 'You’re offline. Reconnect to the internet, then try again.' : 'Can’t reach the call server. Check your connection and try again.')
       : describeFailure(error.message, error.code, error.httpStatus);
-    if (entry) setMark(entry, 'Not delivered', 'failed');
+    if (entry) { if (!cleanedText) setText(entry, 'Message not sent.'); setMark(entry, 'Not delivered', 'failed'); }
     if (text === INVALID_LINK) { invalidLink(); showError(text); }
     else { setStatus('Not sent', 'error'); showError(text); }
   } finally { clearTimeout(timeout); sending = false; refresh(); }
@@ -543,7 +555,7 @@ window.addEventListener('keyup', event => {
 });
 window.addEventListener('blur', () => { if (rec) cancelRecording(); });
 window.addEventListener('pagehide', () => { stopConnection(); releaseMic(); });
-window.addEventListener('online', () => { if (joined && !connected && !source) openStream(); });
+window.addEventListener('online', () => { if (joined && !connected) openStream(); });
 
 $('micSelect').addEventListener('change', event => {
   micId = event.target.value; lsSet('vf-call-mic', micId);
