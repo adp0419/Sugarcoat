@@ -212,7 +212,7 @@ async def run(verbatim: str, mode: Mode, decisions: Decisions | None = None,
 _FILLER_WORDS = r"(?:u+m+|u+h+|e+r+m?|a+h+|h+m+|mm+|you know|i mean)"
 _FILLER_RE = re.compile(rf"^{_FILLER_WORDS}$", re.I)
 _FILLER_SPAN = re.compile(rf"(?:,\s*)?(?<![\w'-])(?:{_FILLER_WORDS}|like(?=,))\b[,.]?\s*", re.I)
-_STUTTER = re.compile(r"\b(\w+)-\s*(?=\1\b)", re.I)  # "I- I want" -> "I want"
+_STUTTER = re.compile(r"\b(\w+)-\s*(?=\1\b)|\b(\w+)-\s+(?=\2\w)", re.I)  # "I- I want", "an- and" -> drop fragment
 _REPEAT = re.compile(r"\b(\w+)(\s*,?\s+\1\b)+", re.I)  # "the the" -> "the"
 
 
@@ -239,9 +239,11 @@ _SC_FILL = r"(?:um+|uh+|er+|ah+)"
 _SC_MARK = (r"(?:no,?\s+wait|wait,?\s+no|actually|sorry|i\s+mean|or\s+rather|rather|make\s+that|scratch\s+that|oops"
             r"|(?:no|wait)(?=\s*[,—–-]))")
 _SC_P = r"[\s,—–-]*"
+# "Friday at five PM no wait sorry Monday at five PM" (real ASR: no punctuation, compound values)
+_JOIN = r",?\s+(?:at|on|by|in)\s+"
 _INLINE = re.compile(
-    rf"(?<![\w'$])(?P<x>{_VALUE})(?P<sep>{_SC_P}(?:{_SC_FILL}{_SC_P})*{_SC_MARK}(?:{_SC_P}(?:{_SC_FILL}|{_SC_MARK}))*{_SC_P})"
-    rf"(?:(?P<prep>on|at|by|in|to)\s+)?(?P<y>{_VALUE})", re.I)
+    rf"(?<![\w'$])(?P<x>{_VALUE}(?:{_JOIN}{_VALUE})?)(?P<sep>{_SC_P}(?:{_SC_FILL}{_SC_P})*{_SC_MARK}(?:{_SC_P}(?:{_SC_FILL}|{_SC_MARK}))*{_SC_P})"
+    rf"(?:(?P<prep>on|at|by|in|to)\s+)?(?P<y>{_VALUE}(?:{_JOIN}{_VALUE})?)", re.I)
 _PREP_BEFORE = re.compile(r"\b(on|at|by|in|to)\s+$", re.I)
 
 
@@ -256,9 +258,13 @@ def _value_kind(v: str) -> str:
     return "num"
 
 
-def _same_kind(a: str, b: str) -> bool:
-    # strictly the same kind: "at 5, I mean 6 PM" stays as spoken (the guard cannot pair a number with a time)
-    return _value_kind(a) == _value_kind(b)
+def _same_kind(x: str, y: str) -> bool:
+    """Y must restate every part of X with the same kinds: "Friday at 5 PM, sorry, Monday at 6 PM" yes,
+    "Friday at 5 PM, sorry, Monday" no (was 5 PM dropped or kept?). Strict kinds: "at 5, I mean 6 PM" stays as
+    spoken (the guard cannot pair a number with a time)."""
+    kx = [_value_kind(v) for v in re.split(_JOIN, x, flags=re.I)]
+    ky = [_value_kind(v) for v in re.split(_JOIN, y, flags=re.I)]
+    return ky[:len(kx)] == kx
 
 
 _RESTART = re.compile(

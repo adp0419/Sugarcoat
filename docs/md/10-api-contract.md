@@ -19,6 +19,21 @@ Silence so far returns 200 with `text: ""`. MOCK=1: a growing prefix of the cano
 (6 words per `seq`) after a 300 ms sleep.
 Recommended client interval: see "Live latency" below.
 
+### Live latency (measured 2026-10-24, M-series MPS, CrisperWhisper turbo, `say` speech as webm/opus, 3 runs each)
+| audio so far | median | runs (ms) |
+|---|---|---|
+| 5 s | 1.25 s | 1387, 1254, 1245 |
+| 10 s | 1.48 s | 1480, 1433, 2092 |
+| 20 s | 1.88 s | 2979, 1881, 1708 |
+| 40 s (39.1) | 4.05 s | 4150, 4051, 4008 |
+(Live passes skip word timestamps; with them the medians were 1.6 / 2.5 / 3.9 / 6.9 s.)
+
+**Recommended client interval: 3000 ms, one request in flight.** Fire a tick every 3 s, but skip it if the
+previous `/api/live` has not answered yet (no wasted uploads; the server's 429 `busy` is the backstop). Up to
+~20 s of audio the draft refreshes every 3 s; at 40 s every ~4 s. Stop ticking the moment recording stops:
+the final `/api/process` ASR refuses new live passes, but the model runs one job at a time, so a live pass that
+is already running delays the final one by at most that pass (≤ ~4 s at 40 s, usually ~1.5 s).
+
 ## GET /api/jobs/{id}/events (SSE)
 Events: `stage` `{stage, status:"start|done|error|fallback", ms, preview}` ; `result` `{Job}` ; `error` `{message}`. Stage names: convert, asr, decide, rewrite, guard.
 Fallback: `GET /api/jobs/{id}` returns the current Job (UI polls every 800 ms if EventSource fails).

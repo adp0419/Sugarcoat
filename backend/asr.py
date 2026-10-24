@@ -17,6 +17,8 @@ from .errors import api_error
 from .models import ASRResult, Word
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")  # must be set before torch loads
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")  # generation_config / attention-mask chatter on every call
+logging.getLogger("crisperwhisper").setLevel(logging.WARNING)  # per-chunk INFO lines on every live pass
 
 log = logging.getLogger("voiceflow.asr")
 
@@ -86,7 +88,8 @@ async def convert(src: Path, dst: Path, max_seconds: float | None = None) -> Non
     cap = ["-t", str(max_seconds)] if max_seconds else []
     rc, out = await _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(src), *cap, "-ar", "16000", "-ac", "1", str(dst))
     if rc != 0 or not dst.exists():
-        raise api_error("asr_failed", "Could not read the recording.", "Try recording again (Chrome or Safari).")
+        # the upload is not decodable audio: the client's problem, so 422 rather than 500
+        raise api_error("asr_failed", "Could not read the recording.", "Try recording again (Chrome or Safari).", 422)
 
 
 async def mean_volume_db(wav: Path) -> float | None:
@@ -115,21 +118,22 @@ def clean_tags(text: str) -> str:
     return _TAG.sub(lambda m: m.group(1).lower(), text)
 
 
-def _transcribe_sync(wav: Path) -> ASRResult:
-    r = _model.transcribe(str(wav), language="en", mode="verbatim", word_timestamps=True)
+def _transcribe_sync(wav: Path, word_timestamps: bool = True) -> ASRResult:
+    r = _model.transcribe(str(wav), language="en", mode="verbatim", word_timestamps=word_timestamps)
     words = [Word(w=clean_tags(w.word), start=w.start or 0.0, end=w.end or 0.0) for w in (r.words or [])]
     return ASRResult(text=clean_tags(r.text or "").strip(), words=words, seconds=float(r.duration or 0.0))
 
 
-async def transcribe(wav: Path) -> ASRResult:
-    """RMS gate -> CrisperWhisper in the executor -> hallucination gate. Raises ApiError no_speech/asr_failed."""
+async def transcribe(wav: Path, word_timestamps: bool = True) -> ASRResult:
+    """RMS gate -> CrisperWhisper in the executor -> hallucination gate. Raises ApiError no_speech/asr_failed.
+    word_timestamps=False is for /api/live drafts (no sentence splitting needed)."""
     db = await mean_volume_db(wav)
     if db is None or db < SILENCE_DB:
         raise api_error("no_speech", "Couldn't hear anything.", "Check your microphone and try again.")
     if _model is None:
         await load()
     try:
-        res = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(_pool, _transcribe_sync, wav), 60)
+        res = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(_pool, _transcribe_sync, wav, word_timestamps), 60)
     except asyncio.TimeoutError:
         raise api_error("asr_failed", "Transcription timed out.", "Try a shorter recording.")
     except Exception as e:

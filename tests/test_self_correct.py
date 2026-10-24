@@ -33,6 +33,8 @@ def _passes(original, rewrite, mode="natural"):
     ("um so Friday actually Monday at five", "So Monday at five"),
     ("We need twenty, sorry, thirty volunteers.", "We need thirty volunteers."),
     ("Call me at 5:30, scratch that, 6:15.", "Call me at 6:15."),
+    ("We meet Friday at 5, sorry, 6.", "We meet Friday at 6."),
+    ("It's on Friday at 5 PM, sorry, Monday at 6 PM.", "It's on Monday at 6 PM."),
 ])
 def test_inline_corrections(src, want):
     r = _fix(src)
@@ -147,3 +149,18 @@ def test_ladder_uses_self_correction_and_notes_it(monkeypatch):
     assert time.perf_counter() - t < 2  # 402 is not retried
     assert job.rung == "minimal" and "Friday" not in job.rewrite and job.guard.pass_
     assert main.NOTE_SELF_CORRECTED in job.notes
+
+
+def test_real_demo_clip_transcript():
+    """CrisperWhisper on frontend/demo-clip.m4a (2026-10-24): no punctuation, compound values, a fragment stutter."""
+    src = ("So um the team meeting is on uh Friday at five PM no wait sorry Monday at five PM an- and everyone "
+           "should bring their laptops.")
+    r = _fix(src)
+    assert r.rewrite == "So the team meeting is on Monday at five PM and everyone should bring their laptops."
+    _passes(src, r.rewrite)
+
+
+def test_compound_value_needs_a_full_restatement():
+    # was 5 PM dropped or kept? Leave it to Gemma / the user.
+    src = "It's on Friday at 5 PM, sorry, Monday."
+    assert _fix(src).rewrite == src

@@ -88,7 +88,7 @@ async def stage(st: JobState, name: str, fn: Callable[[], Awaitable[Any]], *, mo
         res, ok = e, False
         err = e.message if isinstance(e, ApiError) else f"{type(e).__name__}: {e}"
         pv = ""
-        if not isinstance(e, (ApiError, NotImplementedError)):
+        if not isinstance(e, (ApiError, NotImplementedError, rw.GemmaUnavailable)):  # expected; status logs changes
             log.warning("stage %s failed: %s", name, err)
     ms = int((time.perf_counter() - t) * 1000)
     st.job.trace.append(TraceEntry(stage=name, ok=ok, ms=ms, model=model, preview=pv.strip(), error=err))
@@ -459,7 +459,7 @@ async def live(audio: UploadFile = File(...), seq: int = Form(...)):
             if _final_asr:  # a final pass arrived while we converted: let it have the model
                 raise _busy("Final transcription in progress.")
             try:
-                text = (await asr.transcribe(wav)).text
+                text = (await asr.transcribe(wav, word_timestamps=False)).text
             except ApiError as e:
                 if e.code != "no_speech":
                     raise

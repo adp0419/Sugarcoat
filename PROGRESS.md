@@ -24,12 +24,12 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] 5  Makefile, pinned requirements.txt, .env.example (2026-10-23)
 
 ### T1 Round 3
-- [ ] R3.1 POST /api/live (live draft transcript; real + MOCK; latency measured; interval documented)
+- [x] R3.1 POST /api/live: real + MOCK, busy lock, final-ASR priority, 45 s / 10 MB caps, audio never stored; 11 tests. Medians 1.25/1.48/1.88/4.05 s for 5/10/20/40 s audio (no word timestamps); client interval 3 s, one in flight (docs/md/10) (2026-10-24 10:35)
 - [x] R3.2 deterministic self-correction in the fallback rung (natural/presenter): 38 tests (13 inline, 6 restart markers, 10 false positives, canonical + user backtrack pass guard.check_rules), note `Self-corrections fixed by rules (AI editor unavailable)` (2026-10-24 10:28)
 - [x] R3.3 Gemini 401/402/403 + Decisions credit errors: no retry (402 job now ends in <2 s), health `no_credits`/`auth_error` from last real call (persisted in cache/provider_status.json; free models.get passes on a no-credit key, verified) (2026-10-24 10:28)
-- [ ] R3.4 `make smoke` (N runs against a live server, optional SPEAK=1)
-- [ ] R3.5 real end-to-end: `make run` + `make smoke` 5x + SPEAK=1 once, numbers recorded
-- [ ] R3.6 startup/polish: cold start < 60 s, clean logs, unsupported mime rejected
+- [x] R3.4 `make smoke` (scripts/smoke.py; N, BASE, SPEAK=1; exits 1 on failure or a run > 60 s) (2026-10-24 10:35)
+- [x] R3.5 real e2e on :8010 (:8000 held by a server not started by T1): smoke 5/5, wall 2.0-3.5 s, rung=minimal, guard PASS, Friday->Monday fixed by rules; SPEAK=1: 4.0 s audio in 5.2 s, audio/mp4 ok (2026-10-24 10:35)
+- [x] R3.6 cold start to asr_loaded 4-5 s; no keys/audio in logs, transformers/crisperwhisper chatter silenced; 415 unsupported_media, 422 for undecodable audio (2026-10-24 10:35)
 
 ## T2 guard / decide / voice
 - [x] 1  guard.py deterministic checks + unit tests (42 cases; `check_rules` sync, `check` async contract wrapper) (2026-10-23 23:46)

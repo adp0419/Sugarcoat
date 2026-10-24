@@ -77,7 +77,8 @@ def real_live(monkeypatch, tmp_path):
         seen["src"], seen["wav"], seen["cap"] = src, wav, max_seconds
         wav.write_bytes(b"RIFF")
 
-    async def transcribe(wav):
+    async def transcribe(wav, word_timestamps=True):
+        seen["words"] = word_timestamps
         return ASRResult(text="so um the meeting is on")
     monkeypatch.setattr(asr, "convert", convert)
     monkeypatch.setattr(asr, "transcribe", transcribe)
@@ -88,12 +89,12 @@ def test_live_real_path_deletes_audio(real_live):
     with TestClient(main.app) as c:
         r = _live(c, 4)
     assert r.status_code == 200 and r.json()["text"] == "so um the meeting is on"
-    assert real_live["cap"] == main.LIVE_MAX_S
+    assert real_live["cap"] == main.LIVE_MAX_S and real_live["words"] is False
     assert not real_live["src"].exists() and not real_live["wav"].exists()
 
 
 def test_live_real_silence_is_empty_text(real_live, monkeypatch):
-    async def silent(wav):
+    async def silent(wav, word_timestamps=True):
         raise main.api_error("no_speech", "Couldn't hear anything.")
     monkeypatch.setattr(asr, "transcribe", silent)
     with TestClient(main.app) as c:
