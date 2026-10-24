@@ -44,6 +44,8 @@ class SpeakTask:
     created: float = 0.0
     finished: float | None = None
     ms: int = 0
+    started_ms: int | None = None  # render started (0 when chunk 1 came from the cache)
+    first_ms: int | None = None  # chunk 1 playable
 
 
 class SpeakQueue:
@@ -86,7 +88,8 @@ class SpeakQueue:
     def status(self, task: SpeakTask) -> SpeakStatus:
         return SpeakStatus(speak_id=task.id, job_id=task.job_id, status=task.status, chunks=list(task.chunks),
                            total_chunks=len(task.texts), queue_position=self.position(task), error=task.error,
-                           ms=task.ms if task.finished is not None else int((time.perf_counter() - task.t0) * 1000))
+                           ms=task.ms if task.finished is not None else _since(task),
+                           render_started_ms=task.started_ms, first_chunk_ms=task.first_ms)
 
     def cleanup(self) -> int:
         """Drop finished requests older than the TTL. Returns how many were removed."""
@@ -103,6 +106,8 @@ class SpeakQueue:
             if hit is None:
                 return
             task.chunks.append(hit)
+            if task.first_ms is None:
+                task.started_ms = task.first_ms = 0
 
     def _finish(self, task: SpeakTask, status: str, error: ErrorBody | None = None) -> None:
         task.status, task.error = status, error
@@ -125,6 +130,8 @@ class SpeakQueue:
             task = self.waiting.pop(0)
             self.current = task
             task.status = "rendering"
+            if task.started_ms is None:
+                task.started_ms = _since(task)
             try:
                 await self._render_all(task)
             finally:
@@ -134,6 +141,8 @@ class SpeakQueue:
         try:
             for text in task.texts[len(task.chunks):]:
                 task.chunks.append(await task.renderer.render(text))  # published as soon as it lands
+                if task.first_ms is None:
+                    task.first_ms = _since(task)
             self._finish(task, "done")
         except ApiError as e:
             self._finish(task, "failed", ErrorBody(code=e.code, message=e.message, hint=e.hint))
@@ -141,6 +150,10 @@ class SpeakQueue:
             log.warning("speak %s failed: %s", task.id, type(e).__name__)
             self._finish(task, "failed", ErrorBody(code="internal", message=f"{type(e).__name__}",
                                                    hint="See the server log."))
+
+
+def _since(task: SpeakTask) -> int:
+    return int((time.perf_counter() - task.t0) * 1000)
 
 
 class TwinlyRenderer:

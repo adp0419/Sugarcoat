@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PORT ?= 8000
 
-.PHONY: setup run mock test eval lint warm smoke gemma-probe
+.PHONY: setup run mock test eval lint warm smoke gemma-probe bench-stage
 
 setup:  ## venv + deps (needs ffmpeg: brew install ffmpeg)
 	python3 -m venv .venv
@@ -22,6 +22,9 @@ test:  ## no network
 
 smoke:  ## against a running server: N=5 runs of frontend/demo-clip.m4a (BASE=..., SPEAK=1 adds one real speak ~$$0.10, FAST=1 CLIP=fixtures/sentence_short.m4a = stage mode)
 	$(PY) scripts/smoke.py
+
+bench-stage:  ## stage latency, no Twinly speak. URL=http://127.0.0.1:8000 FIXTURES=fixtures JSON=report.json
+	$(PY) scripts/bench_pipeline.py --no-speak --url $${URL:-http://127.0.0.1:$(PORT)} --fixtures $${FIXTURES:-fixtures} $(if $(JSON),--json $(JSON),)
 
 gemma-probe:  ## real Gemini call: 3 inputs x 3 with the rewrite prompt (stops at 402/401/403)
 	$(PY) scripts/gemma_probe.py

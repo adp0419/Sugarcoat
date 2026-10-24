@@ -269,16 +269,19 @@ function toggleRecord() { (document.body.dataset.state === "recording" ? stopRec
 
 // ---------- live level meter ----------
 // RMS of the mic signal in dB, smoothed, drawn as a short scrolling history (or one bar under reduced motion).
-const meter = { an: null, buf: null, hist: [], level: 0, speaking: false, lastLoud: 0, lastAria: 0, lastPush: 0, colors: null };
+// ids: which meter to draw (the recorder's or stage mode's). onFrame(raw, now) gets the unsmoothed level each frame.
+const METER_IDS = { wave: "wave", box: "meter", label: "meter-label" };
+const meter = { an: null, buf: null, hist: [], level: 0, speaking: false, lastLoud: 0, lastAria: 0, lastPush: 0, colors: null, ids: METER_IDS, onFrame: null };
 function meterColors() {
   const cs = getComputedStyle(document.documentElement);
   return { on: cs.getPropertyValue("--c-accent").trim(), off: cs.getPropertyValue("--c-line-strong").trim(), track: cs.getPropertyValue("--c-line").trim() };
 }
 function sizeCanvas() {
-  const c = $("wave"), r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const c = $(meter.ids.wave), r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   c.width = Math.max(1, Math.round(r.width * dpr)); c.height = Math.max(1, Math.round(r.height * dpr));
 }
-function startMeter() {
+function startMeter(stream = app.stream, ids = METER_IDS, onFrame = null) {
+  meter.ids = ids; meter.onFrame = onFrame;
   sizeCanvas();
   meter.colors = meterColors();
   meter.hist = []; meter.level = 0; meter.speaking = false;
@@ -287,7 +290,7 @@ function startMeter() {
     meter.an = app.audioCtx.createAnalyser();
     meter.an.fftSize = 1024;
     meter.buf = new Float32Array(meter.an.fftSize);
-    app.audioCtx.createMediaStreamSource(app.stream).connect(meter.an);
+    app.audioCtx.createMediaStreamSource(stream).connect(meter.an);
   } catch { meter.an = null; }
   const frame = (now) => {
     if (!meter.an) return;
@@ -295,13 +298,14 @@ function startMeter() {
     let sum = 0; for (const v of meter.buf) sum += v * v;
     const db = 20 * Math.log10(Math.sqrt(sum / meter.buf.length) + 1e-8);
     const target = Math.min(1, Math.max(0, (db + 60) / 45)); // -60 dB -> 0, -15 dB -> 1
+    if (meter.onFrame) meter.onFrame(target, now);
     meter.level = target > meter.level ? meter.level + (target - meter.level) * 0.6 : meter.level * 0.88; // fast attack, slow release
     if (meter.level > 0.32) meter.lastLoud = now;
     const speaking = now - meter.lastLoud < 600; // hold "speaking" briefly so pauses between words don't flicker
     if (speaking !== meter.speaking) { meter.speaking = speaking; meterLabel(speaking ? "speech" : "silence"); }
     if (now - meter.lastAria > 500) {
       meter.lastAria = now;
-      $("meter").setAttribute("aria-valuenow", String(Math.round(meter.level * 100)));
+      $(meter.ids.box).setAttribute("aria-valuenow", String(Math.round(meter.level * 100)));
     }
     if (now - meter.lastPush > 45) { meter.lastPush = now; meter.hist.push(meter.level); if (meter.hist.length > 28) meter.hist.shift(); }
     drawMeter();
@@ -311,7 +315,7 @@ function startMeter() {
   requestAnimationFrame(frame);
 }
 function drawMeter() {
-  const c = $("wave"), g = c.getContext("2d"), W = c.width, H = c.height, col = meter.colors || meterColors();
+  const c = $(meter.ids.wave), g = c.getContext("2d"), W = c.width, H = c.height, col = meter.colors || meterColors();
   g.clearRect(0, 0, W, H);
   if (REDUCED.matches) { // one steady level bar, no movement sideways
     g.fillStyle = col.track; g.fillRect(0, H / 2 - 4, W, 8);
@@ -329,8 +333,9 @@ function drawMeter() {
 }
 function meterLabel(s) {
   const text = { off: "Mic off", silence: "Silence", speech: "Speaking" }[s];
-  $("meter-label").dataset.s = s; $("meter-label").textContent = text;
-  $("meter").setAttribute("aria-valuetext", s === "speech" ? "speaking" : s === "silence" ? "silence" : "microphone off");
+  const label = $(meter.ids.label);
+  label.dataset.s = s; label.textContent = text;
+  $(meter.ids.box).setAttribute("aria-valuetext", s === "speech" ? "speaking" : s === "silence" ? "silence" : "microphone off");
 }
 function stopMeter() {
   clearTimeout(app.raf); cancelAnimationFrame(app.raf);
@@ -338,7 +343,8 @@ function stopMeter() {
   if (app.audioCtx) { app.audioCtx.close().catch(() => {}); app.audioCtx = null; }
   drawMeter();
   meterLabel("off");
-  $("meter").setAttribute("aria-valuenow", "0");
+  $(meter.ids.box).setAttribute("aria-valuenow", "0");
+  meter.onFrame = null;
 }
 
 // ---------- live draft transcript (POST /api/live) ----------
@@ -412,7 +418,7 @@ document.addEventListener("keydown", (e) => {
     if (app.busy && !app.job) { cancelJob(); return; }
     return;
   }
-  if (e.code !== "Space" || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.code !== "Space" || e.repeat || e.ctrlKey || e.metaKey || e.altKey || document.body.dataset.flow === "stage") return;
   const t = e.target;
   if (t && (t.closest("input, textarea, select, button, summary, a, audio, [tabindex]") || t.isContentEditable)) return;
   e.preventDefault();
@@ -1402,8 +1408,501 @@ $("play-btn").addEventListener("click", () => {
 });
 $("replay").addEventListener("click", () => { if (play.chunks.length) { stopPlayback(); playChain(play.chunks); } });
 
+// ---------- stage mode (POST /api/stage/segment) ----------
+// A radio delay. Voice activity cuts the mic into sentences while you keep talking; each one is sent the moment
+// it ends. Text comes back in ~1.5 s, but a Twinly render takes ~5-8 s per line whatever its length, so
+// sentences that finish while a render is running are batched into the next render: the voice keeps up with
+// continuous speech instead of falling further behind. Playback is a strict FIFO in sentence order.
+// Delay = end of a sentence -> its audio starts. All times are performance.now() ms.
+const VAD = {
+  minLevel: 0.2,        // never call anything quieter than about -51 dBFS speech
+  overFloor: 0.2,       // speech = this far above the room's noise floor (~9 dB)
+  floorRise: 0.04,      // noise floor creeps up this much per second (it drops at once)
+  minSpeechMs: 350,     // shorter bursts (a cough, a click) are dropped
+  clauseQuietMs: 500,   // cut this soon when the live draft already ends a clause
+  quietMs: 800,         // otherwise cut after this much silence
+  longMs: 5000,         // after this much speech, any 300 ms breath ends the segment
+  breathMs: 300,
+  maxSegMs: 15000,      // hard cap
+  idleMs: 8000,         // restart the recorder after this much silence so segments don't carry it
+  echoHoldMs: 350,      // half-duplex: stay deaf this long after our voice stops (room echo)
+};
+const STAGE_LIVE_MS = 1500;
+const SEG_POLL_MS = 300;
+const SEG_FINAL = new Set(["done", "skipped", "failed"]);
+const SEG_LABEL = { processing: "Processing", waiting: "Waiting for voice", rendering: "Making your voice", ready: "Ready",
+  speaking: "Speaking now", done: "Spoken", held: "Needs review", skipped: "Skipped", failed: "Not spoken" };
+const HEADPHONES = /airpods|headphone|headset|earbud|buds|beats|bose|sony wh|wf-/i;
+const MOCK_STAGE = [
+  ["So, um, the team meeting is on Monday at 5 PM.", "So the team meeting is on Monday at 5 PM."],
+  ["Uh, everyone should, um, bring their laptops.", "Everyone should bring their laptops."],
+  ["The demo is on Friday, actually, sorry, Saturday at noon.", "The demo is on Saturday at noon."],
+  ["And, uh, lunch is on me.", "And lunch is on me."],
+];
+const stage = {
+  on: false, stopping: false, session: "", n: 0, duplex: false,
+  stream: null, rec: null, chunks: [], mime: "", segStart: 0,
+  inSpeech: false, speechStart: 0, lastVoice: 0, muted: false, holdUntil: 0, floor: 1, lastFrame: 0,
+  segs: [], groups: [], playing: null, inflight: 0, voicing: null,
+  live: { timer: 0, inflight: false, text: "", gen: 0, seq: 0 },
+};
+window.vfStage = stage; // inspection from the console / benchmarks
+const stagePlayer = new Audio();
+stagePlayer.preload = "auto";
+const now = () => performance.now();
+const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? a[Math.floor((a.length - 1) / 2)] : 0; };
+const p90 = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.ceil(a.length * 0.9) - 1)] : 0; };
+const secs = (ms) => (ms / 1000).toFixed(1) + " s";
+
+function setFlow(flow) {
+  const st = flow === "stage";
+  $("stage").hidden = !st;
+  $("steps").hidden = st;
+  document.body.dataset.flow = flow;
+  store.set("vf-flow", flow);
+  if (st && document.body.dataset.state === "recording") cancelRecording();
+  if (st) listDevices();
+}
+function syncStageStart() {
+  const ok = $("stage-consent").checked;
+  $("stage-start").disabled = !ok || stage.on;
+  $("stage-start-help").textContent = ok ? "Talk normally. Your voice follows a few seconds behind. Press Stop when you're done." : "Tick the first box to start.";
+}
+function setStageState(text) { $("stage-state").textContent = text; }
+function stageError(msg, hint) {
+  const box = $("err-stage");
+  box.replaceChildren(icon("i-alert", "ic callout-ic"), el("div", {}, el("p", { class: "callout-title", text: msg }),
+    hint ? el("p", { class: "callout-sub", text: hint }) : null));
+  box.hidden = false;
+}
+
+// ---- input / output devices ----
+// Input: getUserMedia deviceId. Output: HTMLMediaElement.setSinkId (Chrome, Edge, Firefox; Safari plays through
+// the system output). Device names stay hidden until the page has had microphone permission once.
+const CAN_SINK = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+async function listDevices() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  let devs = [];
+  try { devs = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+  const fill = (sel, kind, key, noun) => {
+    const want = sel.value || store.get(key) || "";
+    const list = devs.filter((d) => d.kind === kind && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications");
+    sel.replaceChildren(el("option", { value: "", text: "System default " + noun }),
+      ...list.map((d, i) => el("option", { value: d.deviceId, text: d.label || noun[0].toUpperCase() + noun.slice(1) + " " + (i + 1) })));
+    sel.value = list.some((d) => d.deviceId === want) ? want : "";
+    return list;
+  };
+  const ins = fill($("stage-in"), "audioinput", "vf-in", "microphone");
+  fill($("stage-out"), "audiooutput", "vf-out", "speaker");
+  $("stage-out-wrap").hidden = !CAN_SINK;
+  $("stage-out-note").hidden = CAN_SINK;
+  // Without mic permission the browser lists no named devices (often none at all): offer to ask.
+  $("stage-devices").hidden = ins.some((d) => d.label);
+}
+async function revealDevices() {
+  try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()); }
+  catch { stageError("Microphone blocked.", "Allow the microphone for this page to choose a device."); return; }
+  await listDevices();
+}
+function outputChanged() {
+  const sel = $("stage-out"), label = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : "";
+  store.set("vf-out", sel.value);
+  if (HEADPHONES.test(label)) { $("stage-duplex").checked = true; store.set("vf-duplex", "1"); }
+}
+async function routeOutput() {
+  const id = $("stage-out").value;
+  if (!CAN_SINK) return;
+  try { await stagePlayer.setSinkId(id); }
+  catch { stageError("Couldn't use that speaker.", "Pick another output, or the system default."); }
+}
+
+async function startStage() {
+  if (stage.on) return;
+  $("err-stage").hidden = true; $("stage-summary").hidden = true;
+  const problem = supportProblem();
+  if (problem) { stageError("Recording isn't available here.", problem); return; }
+  // Prime playback inside the click so later play() calls aren't blocked by autoplay rules.
+  stagePlayer.src = SILENT; stagePlayer.play().catch(() => {});
+  const inId = $("stage-in").value;
+  try {
+    stage.stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: inId ? { exact: inId } : undefined,
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) {
+    const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+    stageError(denied ? "Microphone blocked." : e && e.name === "OverconstrainedError" ? "That microphone isn't available." : "Couldn't start the microphone.",
+      denied ? "Click the lock icon in the address bar, allow the microphone, then press Start again."
+        : e && e.name === "OverconstrainedError" ? "Pick another microphone, or the system default." : (e && e.message) || "Try reloading the page.");
+    return;
+  }
+  store.set("vf-in", inId);
+  await routeOutput();
+  listDevices(); // names appear now that permission is granted
+  stopPlayback();
+  Object.assign(stage, { on: true, stopping: false, session: "st" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    n: 0, duplex: $("stage-duplex").checked, segs: [], groups: [], playing: null, voicing: null, inflight: 0, inSpeech: false,
+    muted: false, holdUntil: 0, floor: 1, lastFrame: 0, mime: pickMime() || "" });
+  $("stage-feed").replaceChildren(); $("h-feed").hidden = true;
+  $("stage-setup").hidden = true; $("stage-run").hidden = false;
+  $("stage-stop-label").textContent = "Stop";
+  const track = stage.stream.getAudioTracks()[0];
+  $("stage-route").textContent = (track && track.label ? track.label : "Default microphone") + " → " +
+    ($("stage-out").selectedOptions[0] && $("stage-out").value ? $("stage-out").selectedOptions[0].textContent : "default speaker");
+  document.querySelectorAll('input[name="flow"]').forEach((r) => { r.disabled = true; });
+  updateDelay();
+  startSegRecorder();
+  startMeter(stage.stream, { wave: "stage-wave", box: "stage-meter", label: "stage-meter-label" }, stageFrame);
+  stage.live.timer = setInterval(stageLiveTick, STAGE_LIVE_MS);
+  setStageState("Listening");
+  announce("Stage mode on. Talk normally; your voice follows a few seconds behind.");
+  $("stage-stop").focus();
+}
+
+// One MediaRecorder per segment. The next one starts before the old one stops, so no audio falls in between.
+function startSegRecorder() {
+  let rec;
+  try { rec = new MediaRecorder(stage.stream, stage.mime ? { mimeType: stage.mime } : undefined); }
+  catch { stageError("This browser can't record here.", "Please use Chrome on desktop."); hardStopStage(); return null; }
+  const chunks = [];
+  rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+  rec.start(250);
+  stage.mime = rec.mimeType || stage.mime || "audio/webm";
+  const old = stage.rec;
+  stage.rec = rec; stage.chunks = chunks; stage.segStart = now();
+  stage.live.text = ""; stage.live.gen++;
+  $("stage-live").textContent = "";
+  return old;
+}
+// Close the current segment: onBlob gets its audio (or nothing is sent when onBlob is null).
+function rotateRecorder(onBlob) {
+  const chunks = stage.chunks, mime = stage.mime;
+  const old = stage.stopping ? stage.rec : startSegRecorder();
+  if (stage.stopping) stage.rec = null;
+  if (!old || old.state === "inactive") return;
+  old.onstop = () => { if (onBlob) onBlob(new Blob(chunks, { type: mime })); };
+  old.stop();
+}
+
+// Voice activity, every meter frame. Speech is judged against the room's own noise floor (it drops at once and
+// creeps up slowly), so a fan, auto-gain or a noisy mic can't hold the gate open.
+function stageFrame(level, t) {
+  if (!stage.on || stage.stopping) return;
+  const dt = stage.lastFrame ? Math.min(0.5, (t - stage.lastFrame) / 1000) : 0;
+  stage.lastFrame = t;
+  stage.floor = level < stage.floor ? level : stage.floor + VAD.floorRise * dt;
+  const deaf = (!stage.duplex && !!stage.playing) || t < stage.holdUntil;
+  if (deaf) { stage.muted = true; return; }
+  if (stage.muted) { stage.muted = false; stage.inSpeech = false; rotateRecorder(null); setStageState("Listening"); return; } // drop the echo
+  if (level > Math.max(VAD.minLevel, stage.floor + VAD.overFloor)) {
+    if (!stage.inSpeech) { stage.inSpeech = true; stage.speechStart = t; setStageState("Hearing you"); }
+    stage.lastVoice = t;
+  }
+  if (stage.inSpeech) {
+    const quiet = t - stage.lastVoice, spoke = t - stage.speechStart;
+    const clause = /[.?!,;:]$/.test(stage.live.text.trim());
+    // Half-duplex can't play while you talk, so when your voice is waiting, the first short pause ends the segment.
+    const waiting = !stage.duplex && playable();
+    const need = spoke > VAD.longMs || waiting ? VAD.breathMs : clause ? VAD.clauseQuietMs : VAD.quietMs;
+    if (quiet >= need || spoke >= VAD.maxSegMs) cutSegment(t);
+  } else if (t - stage.segStart > VAD.idleMs) rotateRecorder(null);
+}
+
+function cutSegment(t) {
+  stage.inSpeech = false;
+  const end = stage.lastVoice, spoke = end - stage.speechStart;
+  if (spoke < VAD.minSpeechMs) { rotateRecorder(null); setStageState("Listening"); pumpStage(); return; }
+  const seg = { n: stage.n++, endAt: end, cutAt: t, state: "processing", draft: stage.live.text };
+  stage.segs.push(seg);
+  addSegRow(seg);
+  setStageState("Listening");
+  rotateRecorder((blob) => sendSegment(seg, blob));
+  pumpStage(); // half-duplex playback waits for a pause; this is one
+}
+
+// Text only (consent=0): the voice is requested by voiceNext() so waiting sentences can share one render.
+async function sendSegment(seg, blob) {
+  stage.inflight++;
+  const fd = new FormData();
+  fd.append("audio", blob, "segment." + (stage.mime.includes("mp4") ? "m4a" : "webm"));
+  fd.append("session", stage.session);
+  fd.append("segment", String(seg.n));
+  fd.append("protected_terms", $("terms").value);
+  fd.append("consent", "0");
+  try {
+    const r = app.mock ? await mockSegment(seg) : await api("/api/stage/segment", { method: "POST", body: fd }, 30000);
+    seg.respAt = now(); seg.res = r; seg.heard = r.verbatim; seg.text = r.rewrite; seg.jobId = r.job_id;
+    if (r.guard && r.guard.pass) seg.state = "waiting";
+    else {
+      seg.state = "held";
+      seg.reason = (r.guard && r.guard.violations || []).map((v) => v.message).join(" ") || "The meaning check couldn't confirm this sentence.";
+      announce("A sentence needs your review before it's spoken.");
+    }
+  } catch (e) {
+    if (e.code === "no_speech") { seg.state = "skipped"; seg.quiet = true; }
+    else { seg.state = "failed"; seg.reason = e.message || "Couldn't process this sentence."; }
+  } finally { stage.inflight--; }
+  renderSeg(seg);
+  voiceNext();
+  pumpStage();
+}
+
+// One render at a time (Twinly runs one job at a time anyway). When it's free, every sentence waiting in order
+// goes into the next render. A sentence still being transcribed holds back the ones after it (order matters).
+async function voiceNext() {
+  if (stage.voicing) return;
+  const batch = [];
+  for (const s of stage.segs) {
+    if (s.state === "processing") break;
+    if (s.state === "waiting") batch.push(s);
+  }
+  if (!batch.length) { maybeFinishStage(); return; }
+  const g = { segs: batch, chunks: [], played: 0, speakDone: false, sentAt: now() };
+  stage.voicing = g; stage.groups.push(g);
+  batch.forEach((s) => { s.state = "rendering"; s.group = g; renderSeg(s); });
+  const text = batch.map((s) => s.text).join(" ");
+  try {
+    const r = app.mock ? { speak_id: "mock" } : await api("/api/speak/async", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: batch[0].jobId, text }) });
+    await pollGroup(g, r.speak_id);
+  } catch (e) { failGroup(g, e); }
+  if (stage.voicing === g) stage.voicing = null;
+  pumpStage();
+  voiceNext();
+}
+
+async function pollGroup(g, id) {
+  for (let i = 0; i < 300 && stage.groups.includes(g); i++) { // ~90 s
+    let r;
+    try { r = app.mock ? mockSpeak(g) : await api("/api/speak/" + encodeURIComponent(id), {}, 10000); }
+    catch (e) { if (e.code === "not_found") throw e; await sleep(SEG_POLL_MS); continue; }
+    if (r.chunks && r.chunks.length > g.chunks.length) {
+      g.chunks = r.chunks;
+      if (!g.firstAt) { g.firstAt = now(); stage.voicing = null; voiceNext(); } // chunk 1 is in: line up the next render
+      g.segs.forEach((s) => { if (s.state === "rendering") { s.state = "ready"; renderSeg(s); } });
+      pumpStage();
+    }
+    if (r.status === "done" || r.status === "failed") {
+      g.speakDone = true;
+      if (r.status === "failed" && !g.chunks.length) throw r.error || { message: "Twinly couldn't make this audio." };
+      pumpStage();
+      return;
+    }
+    await sleep(SEG_POLL_MS);
+  }
+  if (!g.speakDone) throw { code: "timeout", message: "Making your voice took too long." };
+}
+function failGroup(g, e) {
+  const kind = speakErrorKind(e || {});
+  const msg = (SPEAK_ERRORS[kind] && SPEAK_ERRORS[kind].msg) || (e && e.message) || "Twinly couldn't make this sentence.";
+  g.speakDone = true; g.failed = true;
+  g.segs.forEach((s) => { s.state = "failed"; s.reason = msg; if (kind === "job_unverified") s.locked = true; renderSeg(s); }); // never resend
+}
+
+// Play the earliest unplayed render when its audio is there.
+const nextGroup = () => stage.groups.find((g) => !g.failed && !(g.speakDone && g.played >= g.chunks.length));
+function playable() { const g = !stage.playing && nextGroup(); return !!g && g.played < g.chunks.length; }
+function pumpStage() {
+  if (stage.playing) return;
+  const g = nextGroup();
+  if (!g) { maybeFinishStage(); return; }
+  if (g.played >= g.chunks.length) return; // still rendering
+  if (!stage.duplex && stage.inSpeech && !stage.stopping) return; // don't talk over the user; the next cut retries
+  playGroup(g);
+}
+
+function playGroup(g) {
+  stage.playing = g;
+  g.segs.forEach((s) => { s.state = "speaking"; renderSeg(s); });
+  const next = () => {
+    if (stage.playing !== g) return;
+    stage.playing = null;
+    g.played++;
+    const finished = g.speakDone && g.played >= g.chunks.length;
+    g.segs.forEach((s) => { if (s.state === "speaking") s.state = finished ? "done" : "ready"; renderSeg(s); });
+    if (!stage.duplex) stage.holdUntil = now() + VAD.echoHoldMs;
+    updateDelay();
+    if (stage.on && !stage.stopping) setStageState("Listening");
+    pumpStage();
+  };
+  stagePlayer.onplaying = () => {
+    if (g.played === 0 && !g.playAt) { g.playAt = now(); g.segs.forEach(renderSeg); updateDelay(); }
+  };
+  stagePlayer.onended = next;
+  stagePlayer.onerror = () => { g.segs.forEach((s) => { s.reason = "The browser couldn't play this audio."; }); next(); };
+  stagePlayer.src = g.chunks[g.played].url;
+  setStageState(stage.duplex ? "Speaking in your voice. Keep going." : "Speaking in your voice. Pause until it ends.");
+  stagePlayer.play().catch(() => { g.segs.forEach((s) => { s.reason = "The browser blocked playback. Press Start again."; }); next(); });
+}
+
+// Delay of one sentence and where it went: your pause, text, waiting for Twinly, Twinly, waiting to play.
+function segDelay(s) {
+  const g = s.group;
+  if (!g || !g.playAt || s.manual) return null;
+  return { total: g.playAt - s.endAt, cut: s.cutAt - s.endAt, text: s.respAt - s.cutAt, queue: Math.max(0, g.sentAt - s.respAt),
+    voice: (g.firstAt || g.playAt) - g.sentAt, wait: Math.max(0, g.playAt - (g.firstAt || g.playAt)) };
+}
+function updateDelay() {
+  const d = stage.segs.map(segDelay).filter(Boolean).map((x) => x.total);
+  $("stage-delay").textContent = d.length ? "~" + secs(median(d)) + " behind you" : "–";
+}
+
+function segActions(seg) {
+  if (seg.state !== "held") return null;
+  const speakIt = el("button", { type: "button", class: "btn btn-primary", text: "Speak anyway" });
+  speakIt.addEventListener("click", () => approveSeg(seg, seg.text));
+  const edit = el("button", { type: "button", class: "btn", text: "Edit" });
+  edit.addEventListener("click", () => editSeg(seg));
+  const skip = el("button", { type: "button", class: "btn btn-quiet", text: "Skip" });
+  skip.addEventListener("click", () => { seg.state = "skipped"; renderSeg(seg); voiceNext(); });
+  return el("div", { class: "row" }, speakIt, edit, skip);
+}
+function editSeg(seg) {
+  const li = seg.li, box = el("textarea", { rows: 2, value: seg.text || seg.heard || "", "aria-label": "Sentence " + (seg.n + 1) + " text" });
+  const save = el("button", { type: "button", class: "btn btn-primary", text: "Speak this" });
+  const cancel = el("button", { type: "button", class: "btn btn-quiet", text: "Cancel" });
+  save.addEventListener("click", () => { const t = box.value.trim(); if (t) approveSeg(seg, t); });
+  cancel.addEventListener("click", () => renderSeg(seg));
+  li.querySelector(".seg-actions").replaceChildren(box, el("div", { class: "row" }, save, cancel));
+  box.focus();
+}
+// Held sentence approved by hand: it joins the next render. Its delay no longer measures the pipeline.
+function approveSeg(seg, text) {
+  seg.text = text; seg.manual = true; seg.state = "waiting"; seg.reason = "";
+  renderSeg(seg);
+  voiceNext();
+}
+
+function addSegRow(seg) {
+  seg.li = el("li", { class: "seg-row" });
+  $("h-feed").hidden = false;
+  $("stage-feed").append(seg.li);
+  renderSeg(seg);
+}
+function renderSeg(seg) {
+  const li = seg.li;
+  if (!li) return;
+  if (seg.quiet) { li.remove(); return; } // nothing was said: no row
+  if (li.contains(document.activeElement) && li.querySelector("textarea")) return; // don't wipe an edit in progress
+  li.dataset.state = seg.state;
+  const d = segDelay(seg), shared = seg.group && seg.group.segs.length > 1;
+  const body = el("div", { class: "seg-body" },
+    el("p", { class: "seg-text", text: seg.text || seg.draft || "…" }),
+    seg.heard && seg.heard !== seg.text ? el("p", { class: "seg-heard", text: "Heard: " + seg.heard }) : null,
+    seg.reason ? el("p", { class: "seg-reason", text: seg.reason }) : null,
+    el("div", { class: "seg-actions" }, segActions(seg)));
+  const side = el("div", { class: "seg-side" },
+    el("span", { class: "seg-chip", text: SEG_LABEL[seg.state] || seg.state }),
+    d ? el("span", { class: "seg-delay", text: secs(d.total) + " behind",
+      title: "Pause " + secs(d.cut) + " · text " + secs(d.text) + " · waiting for Twinly " + secs(d.queue) + " · Twinly " + secs(d.voice) +
+        " · waiting to play " + secs(d.wait) + (shared ? " · spoken together with " + (seg.group.segs.length - 1) + " other" : "") }) : null);
+  li.replaceChildren(el("span", { class: "seg-num", text: String(seg.n + 1) }), body, side);
+}
+
+// Live draft of the sentence being spoken (only this segment's audio, so each pass stays short).
+async function stageLiveTick() {
+  const L = stage.live;
+  if (!stage.on || stage.stopping || app.mock || app.live.ok === false || L.inflight || !stage.inSpeech || stage.inflight || !stage.chunks.length) return;
+  const gen = L.gen, seq = ++L.seq;
+  L.inflight = true;
+  const fd = new FormData();
+  fd.append("audio", new Blob(stage.chunks, { type: stage.mime }), "live." + (stage.mime.includes("mp4") ? "m4a" : "webm"));
+  fd.append("seq", String(seq));
+  try {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 6000);
+    const res = await fetch("/api/live", { method: "POST", body: fd, signal: ctl.signal }).finally(() => clearTimeout(t));
+    if (!res.ok || gen !== L.gen) return;
+    const body = await res.json();
+    if (gen !== L.gen) return;
+    L.text = body.text || "";
+    $("stage-live").textContent = L.text;
+  } catch { /* the draft is optional */ }
+  finally { L.inflight = false; }
+}
+
+function stopStage() {
+  if (!stage.on) return;
+  if (stage.stopping) { hardStopStage(); return; } // second press: stop now
+  if (stage.inSpeech) cutSegment(now());
+  stage.stopping = true;
+  clearInterval(stage.live.timer);
+  rotateRecorder(null);
+  stopMeter();
+  if (stage.stream) stage.stream.getTracks().forEach((t) => t.stop());
+  stage.stream = null;
+  $("stage-live").textContent = "";
+  $("stage-stop-label").textContent = "Stop now";
+  setStageState("Finishing the last sentences…");
+  pumpStage();
+}
+function hardStopStage() {
+  stage.stopping = true;
+  clearInterval(stage.live.timer);
+  if (stage.rec && stage.rec.state !== "inactive") { stage.rec.onstop = null; stage.rec.stop(); }
+  stage.rec = null;
+  stopMeter();
+  if (stage.stream) stage.stream.getTracks().forEach((t) => t.stop());
+  stage.stream = null;
+  stagePlayer.onended = null; stagePlayer.pause();
+  stage.playing = null; stage.groups = []; stage.voicing = null;
+  stage.segs.forEach((s) => { if (!SEG_FINAL.has(s.state) && s.state !== "held") { s.state = "skipped"; renderSeg(s); } });
+  finishStage();
+}
+function maybeFinishStage() {
+  if (stage.on && stage.stopping && !stage.inflight && !stage.playing && !stage.voicing && !nextGroup() &&
+      stage.segs.every((s) => SEG_FINAL.has(s.state) || s.state === "held")) finishStage();
+}
+function finishStage() {
+  if (!stage.on) return;
+  stage.on = false;
+  $("stage-run").hidden = true; $("stage-setup").hidden = false;
+  document.querySelectorAll('input[name="flow"]').forEach((r) => { r.disabled = false; });
+  syncStageStart();
+  const ds = stage.segs.map(segDelay).filter(Boolean), spoken = stage.segs.filter((s) => s.state === "done").length;
+  const renders = stage.groups.filter((g) => g.playAt).length;
+  const part = (k) => secs(median(ds.map((d) => d[k])));
+  const box = $("stage-summary");
+  box.replaceChildren(icon("i-info", "ic callout-ic"), el("div", {},
+    el("p", { class: "callout-title", text: spoken + " sentence" + (spoken === 1 ? "" : "s") + " spoken in " + renders + " voice render" + (renders === 1 ? "" : "s") +
+      (ds.length ? ". Median delay " + secs(median(ds.map((d) => d.total))) + ", slowest 10% " + secs(p90(ds.map((d) => d.total))) + "." : ".") }),
+    ds.length ? el("p", { class: "callout-sub", text: "Typical split: your pause " + part("cut") + ", text " + part("text") + ", waiting for Twinly " + part("queue") +
+      ", Twinly " + part("voice") + ", waiting to play " + part("wait") + "." }) : null));
+  box.hidden = false;
+  if (ds.length) console.table(stage.segs.map((s) => ({ n: s.n + 1, state: s.state, ...Object.fromEntries(Object.entries(segDelay(s) || {}).map(([k, v]) => [k, Math.round(v)])), server: s.res && s.res.timings && s.res.timings.total_ms })));
+  announce(box.textContent);
+  $("stage-start").focus();
+}
+
+// Offline demo (?mock=1): canned sentences and tones, same shapes as the server.
+async function mockSegment(seg) {
+  await sleep(450);
+  const [heard, text] = MOCK_STAGE[seg.n % MOCK_STAGE.length];
+  return { job_id: "mock-" + seg.n, segment: seg.n, verbatim: heard, rewrite: text, guard: { pass: true, violations: [] },
+    speak_id: null, held: false, timings: { asr_ms: 300, rewrite_ms: 1, guard_ms: 2, total_ms: 400 } };
+}
+const MOCK_VOICE_MS = Number(params.get("voice_ms")) || 900; // test toggle: ?voice_ms=6000 ~ a real Twinly render
+function mockSpeak(g) {
+  g.mockT = g.mockT || now();
+  return now() - g.mockT < MOCK_VOICE_MS ? { status: "rendering", chunks: [] }
+    : { status: "done", chunks: [{ url: toneWav(1.4, 440 + (g.segs[0].n % 4) * 60), seconds: 1.4, cached: false }] };
+}
+
 // ---- wiring ----
 $("record").addEventListener("click", toggleRecord);
+document.querySelectorAll('input[name="flow"]').forEach((r) => r.addEventListener("change", (e) => setFlow(e.target.value)));
+$("stage-consent").addEventListener("change", syncStageStart);
+$("stage-duplex").checked = store.get("vf-duplex") === "1";
+$("stage-duplex").addEventListener("change", (e) => store.set("vf-duplex", e.target.checked ? "1" : "0"));
+$("stage-start").addEventListener("click", startStage);
+$("stage-in").addEventListener("change", (e) => store.set("vf-in", e.target.value));
+$("stage-out").addEventListener("change", outputChanged);
+$("stage-devices").addEventListener("click", revealDevices);
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener("devicechange", listDevices);
+$("stage-stop").addEventListener("click", stopStage);
+{
+  const f = params.get("flow") || store.get("vf-flow") || "one";
+  const r = document.querySelector('input[name="flow"][value="' + (f === "stage" ? "stage" : "one") + '"]');
+  r.checked = true; setFlow(r.value);
+}
+syncStageStart();
 $("demo").addEventListener("click", useDemoClip);
 $("wd-plain").addEventListener("click", usePlainText);
 $("wd-retry").addEventListener("click", retryJob);

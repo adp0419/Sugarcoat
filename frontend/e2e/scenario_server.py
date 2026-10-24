@@ -23,6 +23,7 @@ MINIMAL = "So my name is Ariane Patel and the team meeting is on Friday, no wait
 app = FastAPI()
 HEALTH_OK = {"asr_loaded": True, "decisions": "ok", "gemma": "ok", "twinly": {"online": True, "voice_ready": True}, "mock": False}
 state = {"scenario": "ok", "health": HEALTH_OK, "live": "ok", "live_calls": [], "live_inflight": 0, "live_max": 0}
+speaks: dict[str, dict] = {}
 jobs: dict[str, dict] = {}
 
 
@@ -99,6 +100,7 @@ async def set_scenario(req: Request):
     state["health"] = {**HEALTH_OK, **body.get("health", {})}
     state["live"] = body.get("live", "ok")
     state.update(live_calls=[], live_max=0)
+    speaks.clear()
     return {"scenario": state["scenario"]}
 
 
@@ -185,6 +187,57 @@ SPEAK_ERRORS = {  # shapes mirror backend/errors.py + backend/voice.py
     "rate_limited": (429, "rate_limited", "Twinly rate limit hit.", "Wait a minute and try again."),
     "job_unverified": (503, "job_unverified", "Twinly could not confirm whether the line was spoken.", "Check the Twinly app."),
 }
+
+
+# Stage segment. Scenario names (POST /__scenario {"name": ...}): pass, held, slow (sleeps 3 s), 500.
+# Any other scenario behaves as pass. consent=1 and a passing guard enqueue a speak the client can poll.
+HELD_GUARD = {"pass": False, "violations": [
+    {"rule": "superseded_value", "original_span": "Friday", "rewrite_span": "Friday",
+     "message": "You corrected Friday to Monday, but the rewrite says Friday."}],
+    "decisions_probs": {}, "verifier": "offline"}
+
+
+def _stage_name(name: str) -> str:
+    return name.removeprefix("stage-")
+
+
+@app.post("/api/stage/segment")
+async def stage_segment(audio: UploadFile, session: str = Form(...), segment: int = Form(...),
+                        protected_terms: str = Form(""), consent: str = Form("0")):
+    del audio, protected_terms, session
+    name = _stage_name(state["scenario"])
+    if name == "500":
+        return JSONResponse({"error": {"code": "internal", "message": "Stage segment failed.", "hint": "Try the sentence again."}},
+                            status_code=500)
+    if name == "slow":
+        await asyncio.sleep(3)
+    held = name == "held"
+    consent_on = consent in ("1", "true", "True")
+    speak_id = None
+    job_id = str(uuid.uuid4())
+    if not held and consent_on:
+        speak_id = str(uuid.uuid4())
+        speaks[speak_id] = {
+            "speak_id": speak_id, "job_id": job_id, "status": "done",
+            "chunks": [{"url": "/api/audio/demo.m4a", "seconds": 3.84, "cached": False}],
+            "total_chunks": 1, "queue_position": 0, "error": None, "ms": 800, "synthetic": True,
+            "render_started_ms": 40, "first_chunk_ms": 800,
+        }
+    return {
+        "job_id": job_id, "segment": segment,
+        "verbatim": VERBATIM, "rewrite": MINIMAL if held else REWRITE,
+        "guard": HELD_GUARD if held else guard(),
+        "speak_id": speak_id, "held": held,
+        "timings": {"asr_ms": 420, "rewrite_ms": 18, "guard_ms": 12, "total_ms": 480},
+    }
+
+
+@app.get("/api/speak/{speak_id}")
+async def speak_status(speak_id: str):
+    row = speaks.get(speak_id)
+    if row is None:
+        return JSONResponse({"error": {"code": "not_found", "message": "Unknown speak.", "hint": ""}}, status_code=404)
+    return row
 
 
 @app.post("/api/speak")

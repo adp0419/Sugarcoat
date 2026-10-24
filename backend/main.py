@@ -27,7 +27,8 @@ from .errors import ApiError, api_error
 from .models import (
     Decisions, ErrorBody, GuardResult, HealthResponse, Job, LiveResponse, MeVoice, MeVoiceRequest, Mode,
     ProcessAccepted, RewriteRequest,
-    SessionJob, SessionResponse, SpeakAccepted, SpeakRequest, SpeakResponse, SpeakStatus, TraceEntry,
+    SessionJob, SessionResponse, SpeakAccepted, SpeakRequest, SpeakResponse, SpeakStatus, StageSegmentResponse,
+    StageTimings, TraceEntry,
     TwinlyHealth, Violation,
 )
 
@@ -683,6 +684,79 @@ async def speak_status(speak_id: str):
     if task is None:
         raise api_error("not_found", "Unknown speak request.", "It expired (1 h) or the server restarted. Speak again.")
     return speakq.QUEUE.status(task)
+
+
+# ---------------------------------------------------------------- stage mode: one round trip per sentence
+async def _segment_asr(src: Path, segment: int, tm: StageTimings) -> str:
+    """Segment-only ASR, no word timestamps. Holds the final-ASR flag so /api/live drafts step aside."""
+    global _final_asr
+    if settings.MOCK:
+        await asyncio.sleep(0.25)
+        tm.asr_ms = 250
+        src.unlink(missing_ok=True)
+        return mock.segment_text(segment)
+    wav = src.with_suffix(".wav")
+    try:
+        t = time.perf_counter()
+        await asr.convert(src, wav)
+        tm.convert_ms = int((time.perf_counter() - t) * 1000)
+        _final_asr += 1
+        t = time.perf_counter()
+        try:
+            res = await asyncio.wait_for(asr.transcribe(wav, word_timestamps=False), 30)
+        finally:
+            _final_asr -= 1
+            tm.asr_ms = int((time.perf_counter() - t) * 1000)
+        return res.text
+    finally:
+        if not settings.KEEP_AUDIO:
+            for p in (src, wav):
+                p.unlink(missing_ok=True)
+
+
+@app.post("/api/stage/segment", response_model=StageSegmentResponse)
+async def stage_segment(request: Request, audio: UploadFile = File(...), session: str = Form(...),
+                        segment: int = Form(...), protected_terms: str = Form(""), consent: bool = Form(False)):
+    """Stage mode, one sentence: segment ASR -> deterministic rewrite -> rules-only guard -> if it passes and the
+    session consented, queue the render right away. Gemma and Decisions are never called: each costs seconds
+    the radio delay doesn't have. A guard failure is held (speak_id null) until the user approves it."""
+    if not SESSION_ID.match(session):
+        raise api_error("bad_request", "Bad session id.", "Use 1-64 letters, digits, '-' or '_'.")
+    t0 = time.perf_counter()
+    client = await _speaker(request) if consent else None  # auth problems fail before we spend ASR time
+    job_id = uuid.uuid4().hex
+    protected = [x.strip() for x in protected_terms.split(",") if x.strip()]
+    tm = StageTimings()
+    src = await _save_upload(audio, job_id)
+    verbatim = await _segment_asr(src, segment, tm)
+
+    t = time.perf_counter()
+    res = rw.minimal(verbatim, "natural")
+    text, edits = (res.rewrite, res.edits) if res.rewrite.strip() else (verbatim, [])
+    tm.rewrite_ms = int((time.perf_counter() - t) * 1000)
+    t = time.perf_counter()
+    g = await _guard(verbatim, text, "natural", protected, rules_only=True)
+    tm.guard_ms = int((time.perf_counter() - t) * 1000)
+
+    job = Job(id=job_id, status="ready", mode_requested="natural", mode_used="natural", rung="minimal", fast=True,
+              session=session, segment=segment, verbatim=verbatim, rewrite=text, edits=edits, guard=g,
+              protected_terms=protected, decisions=Decisions(available=False, recommended_mode="natural",
+                                                             note="Skipped (stage mode)."))
+    job.trace = [TraceEntry(stage="asr", ok=True, ms=tm.convert_ms + tm.asr_ms, model=_models()["asr"], preview=verbatim),
+                 TraceEntry(stage="rewrite", ok=True, ms=tm.rewrite_ms, model="deterministic", preview=text),
+                 TraceEntry(stage="guard", ok=True, ms=tm.guard_ms, model=_guard_label(g, True),
+                            preview="PASS" if g.pass_ else "FAIL: " + "; ".join(v.message for v in g.violations))]
+    if any(e.reason == "self_correction" for e in edits):
+        job.notes.append(NOTE_SELF_CORRECTED)
+    JOBS[job_id] = JobState(job)
+    _session_add(session, job_id)
+
+    speak_id = None
+    if consent and g.pass_:
+        speak_id = speakq.QUEUE.submit(job_id, _check_speak_text(text), _renderer(client)).id
+    tm.total_ms = job.timings.total_ms = int((time.perf_counter() - t0) * 1000)
+    return StageSegmentResponse(job_id=job_id, session=session, segment=segment, verbatim=verbatim, rewrite=text,
+                                guard=g, speak_id=speak_id, held=not g.pass_, timings=tm)
 
 
 # ---------------------------------------------------------------- accounts (AUTH_ENABLED=1 only)

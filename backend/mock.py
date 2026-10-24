@@ -19,6 +19,19 @@ async def _nap():
     await asyncio.sleep(random.uniform(0.3, 0.8))
 
 
+# stage mode: segment N hears sentence N (wrapping), so a session plays out like a short talk
+STAGE_SEGMENTS = (
+    "So, um, the team meeting is on Monday at 5 PM.",
+    "Uh, everyone should, um, bring their laptops.",
+    "The demo is on Friday, actually, sorry, Saturday at noon.",
+    "And, uh, lunch is on me.",
+)
+
+
+def segment_text(segment: int) -> str:
+    return STAGE_SEGMENTS[segment % len(STAGE_SEGMENTS)]
+
+
 def asr_text() -> str:
     return _load("asr_canonical.json")["text"]
 

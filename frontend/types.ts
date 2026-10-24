@@ -73,6 +73,24 @@ export interface SpeakStatus {
   chunks: SpeakChunk[]; // grows in order; on "failed" the listed chunks still play
   total_chunks: number; queue_position: number;
   error: { code: string; message: string; hint: string } | null; ms: number; synthetic: true;
+  // ms from enqueue. null until that moment (still queued / not rendered yet).
+  render_started_ms: number | null;
+  first_chunk_ms: number | null; // first chunk playable
+}
+
+// POST /api/stage/segment (multipart: audio, session, segment, protected_terms?, consent=1).
+// Synchronous. speak_id is set only when the guard passes and consent=1; otherwise null.
+// held=true means the guard failed and nothing was queued; POST /api/speak/async to speak it.
+export interface StageSegmentResponse {
+  job_id: string;
+  session: string;
+  segment: number;
+  verbatim: string;
+  rewrite: string;
+  guard: { pass: boolean; violations: Violation[] };
+  speak_id: string | null;
+  held: boolean;
+  timings: { convert_ms: number; asr_ms: number; rewrite_ms: number; guard_ms: number; total_ms: number };
 }
 
 // POST /api/live (multipart: audio = cumulative recording so far, seq). 429 {error:{code:"busy"}} = skip this tick.

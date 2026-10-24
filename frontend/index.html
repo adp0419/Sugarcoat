@@ -76,7 +76,64 @@
     <button id="first-run-close" class="icon-btn" type="button" aria-label="Dismiss tip"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
 
-  <div class="steps">
+  <div class="flow-switch">
+    <div class="seg" role="radiogroup" aria-label="How to use VoiceFlow">
+      <label><input type="radio" id="flow-one" name="flow" value="one" checked><span>One recording</span></label>
+      <label><input type="radio" id="flow-stage" name="flow" value="stage"><span>Stage mode</span></label>
+    </div>
+  </div>
+
+  <!-- Stage mode: sentence by sentence, spoken a few seconds behind you (POST /api/stage/segment) -->
+  <section id="stage" class="stage" aria-labelledby="h-stage" hidden>
+    <header class="step-head">
+      <h2 id="h-stage" tabindex="-1">Stage mode</h2>
+    </header>
+
+    <div id="stage-setup" class="stage-setup">
+      <p>Talk one sentence at a time. Each sentence is tidied, checked, and spoken in your voice a few seconds after you finish it, like a radio delay.</p>
+      <div class="devices">
+        <div class="field">
+          <label for="stage-in">Input: the microphone you talk into</label>
+          <select id="stage-in"><option value="">System default microphone</option></select>
+        </div>
+        <div class="field" id="stage-out-wrap">
+          <label for="stage-out">Output: where your voice plays</label>
+          <select id="stage-out"><option value="">System default speaker</option></select>
+        </div>
+        <p id="stage-out-note" class="help" hidden>This browser plays through the system output. Choose it in macOS Sound settings.</p>
+        <button id="stage-devices" class="btn" type="button" hidden>List my microphones and speakers (asks for microphone access)</button>
+        <p class="help">Tip: on AirPods, use the Mac's microphone as input and AirPods as output. Using the AirPods mic drops them into low-quality call audio.</p>
+      </div>
+      <label class="check-row"><input type="checkbox" id="stage-consent"><span>Speak each sentence in my voice as soon as it passes the meaning check. Sentences that fail are held for me to review.</span></label>
+      <label class="check-row"><input type="checkbox" id="stage-duplex"><span>Keep listening while my voice plays (headphones, or a speaker away from the mic). Ticked automatically for headphones.</span></label>
+      <button id="stage-start" class="btn btn-primary btn-big" type="button" disabled aria-describedby="stage-start-help">
+        <svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg>Start stage mode
+      </button>
+      <p id="stage-start-help" class="help">Tick the first box to start.</p>
+    </div>
+
+    <div id="stage-run" class="stage-run" hidden>
+      <div class="stage-strip">
+        <div id="stage-meter" class="meter" role="meter" aria-label="Voice level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="microphone off">
+          <canvas id="stage-wave" width="160" height="40" aria-hidden="true"></canvas>
+          <span id="stage-meter-label" class="meter-label" data-s="off" aria-hidden="true">Mic off</span>
+        </div>
+        <p id="stage-state" class="stage-state" role="status" aria-live="polite">Listening</p>
+        <p class="stage-delay" title="Median time from the end of a sentence to hearing it">Delay <strong id="stage-delay">–</strong></p>
+        <button id="stage-stop" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg><span id="stage-stop-label">Stop</span></button>
+      </div>
+      <p id="stage-route" class="help"></p>
+      <p id="stage-live" class="stage-live" aria-hidden="true"></p>
+    </div>
+
+    <div id="err-stage" class="callout" data-tone="bad" role="alert" hidden></div>
+    <div id="stage-summary" class="callout" data-tone="info" hidden></div>
+
+    <h3 id="h-feed" class="feed-title" hidden>Sentences</h3>
+    <ol id="stage-feed" class="stage-feed" aria-labelledby="h-feed"></ol>
+  </section>
+
+  <div class="steps" id="steps">
     <!-- 1 Speak -->
     <section id="step-speak" class="step" data-status="current" aria-labelledby="h-speak">
       <header class="step-head">

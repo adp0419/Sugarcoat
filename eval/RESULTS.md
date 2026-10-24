@@ -133,6 +133,49 @@ HTTP 200 with the finished job every time, never 202). Durations checked with `f
   re-posts a `voice_failed` job once. After the change, 3 concurrent requests rendered without a crash.
 - Cost: 10 real lines this round across all terminals (~$1.00), including 2 failed jobs.
 
+## Stage latency
+
+`scripts/bench_pipeline.py --no-speak` (also `make bench-stage`), 2026-10-24, after `POST /api/stage/segment` landed.
+Two fixtures, each one segment because `ffmpeg silencedetect` found no interior pause: `fixtures/backup_demo.m4a` (3.84 s)
+and `fixtures/sentence_short.m4a` (5.25 s). Posted at real-time pace with `consent=0`. Every response had `speak_id: null`
+and `guard.pass: true`. Nothing was sent to `POST /v1/voice/speak`.
+
+Render is not from this run. It is the p50 of successful short lines already in `logs/twinly_renders.jsonl`
+(≤120 characters, n=7): **p50 5.30 s, p90 6.48 s**. The bench copies that p50 onto every segment, so the
+"render" p90 across these two rows is also 5.30 s. The 6.48 s figure is the history, and using it instead
+of the p50 adds about 1.2 s to the end-of-sentence estimate.
+
+End of sentence → audio = cut delay (0.5 s or 0.9 s) + server total + that 5.30 s render. No approve click.
+Queue wait is 0 because each file is a single segment; a later sentence behind a 5.3 s render would wait.
+n=2, so p90 is the slower of the two runs, not a tail.
+
+### Real ASR (model already warm, CrisperWhisper turbo, MPS)
+
+| file | asr ms | rewrite ms | guard ms | total ms | queue ms |
+|---|---|---|---|---|---|
+| backup_demo.m4a | 1320 | 0 | 26 | 1377 | 0 |
+| sentence_short.m4a | 1338 | 0 | 0 | 1369 | 0 |
+
+| metric | p50 | p90 |
+|---|---|---|
+| asr | 1.33 s | 1.34 s |
+| rewrite | 0 ms | 0 ms |
+| guard | 13 ms | 23 ms |
+| total server | 1.37 s | 1.38 s |
+| queue wait | 0 | 0 |
+| render → first chunk (historical p50, n=7) | 5.30 s | 5.30 s on these rows; history p90 is 6.48 s |
+| end of sentence → audio, cut 0.5 s | 7.17 s | 7.18 s |
+| end of sentence → audio, cut 0.9 s | 7.57 s | 7.58 s |
+
+Against the 9.1 s baseline (1.2 s pause + 2.0 s process + 5.9 s one render): the server is 1.37 s instead of 2.0 s,
+and the cut band is 0.5–0.9 s instead of 1.2 s. The voice is still the quality model. The sum is about **7.2–7.6 s**.
+Swap in the history p90 render and it is about **8.4–8.8 s**.
+
+### MOCK=1 (same files, not a latency measurement)
+
+ASR is the 250 ms stub. The guard time is `mock.guard`'s sleep (667 ms and 698 ms), not `check_rules`.
+Totals 919 ms and 949 ms. Both passed the guard. `speak_id` null.
+
 ## What these numbers do not show
 
 - Gemma 4's editing quality and the Decisions verifier: both were offline (credits). With credits, rerun `make eval`.
