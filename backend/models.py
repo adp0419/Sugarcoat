@@ -189,7 +189,30 @@ class SpeakStatus(_Base):
     queue_position: int = 0  # renders ahead of this one (0 = rendering now or finished)
     error: Optional[ErrorBody] = None
     ms: int = 0
+    render_started_ms: Optional[int] = None  # ms after submit that Twinly started this request (0 = all cached)
+    first_chunk_ms: Optional[int] = None  # ms after submit that chunk 1 became playable
     synthetic: bool = True
+
+
+class StageTimings(_Base):
+    convert_ms: int = 0
+    asr_ms: int = 0
+    rewrite_ms: int = 0
+    guard_ms: int = 0
+    total_ms: int = 0
+
+
+class StageSegmentResponse(_Base):
+    """POST /api/stage/segment: one sentence in, text + guard + (if approved and passing) a queued render out."""
+    job_id: str
+    session: str
+    segment: int
+    verbatim: str
+    rewrite: str
+    guard: GuardResult
+    speak_id: Optional[str] = None  # poll GET /api/speak/{speak_id}
+    held: bool = False  # guard failed: nothing queued until the user approves (POST /api/speak/async)
+    timings: StageTimings = StageTimings()
 
 
 class ProcessAccepted(_Base):
