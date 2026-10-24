@@ -8,12 +8,16 @@ import { AppError } from './lib/http.mjs';
 import { preClean } from './lib/cleanup.mjs';
 import { AUDIO_TYPES, transcribe, cleanWithGoogle } from './lib/providers.mjs';
 import { loadTts, validateAudio } from './lib/tts/index.mjs';
+import { createCall } from './lib/call.mjs';
 
 const files = new Map([
   ['/', ['public/index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['public/app.js', 'text/javascript; charset=utf-8']],
   ['/playback.js', ['public/playback.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['public/style.css', 'text/css; charset=utf-8']],
+  ['/call', ['public/call.html', 'text/html; charset=utf-8']],
+  ['/call.js', ['public/call.js', 'text/javascript; charset=utf-8']],
+  ['/call.css', ['public/call.css', 'text/css; charset=utf-8']],
 ]);
 
 function readAudio(req, limit, signal) {
@@ -42,6 +46,7 @@ function readAudio(req, limit, signal) {
 export async function createApp(config = readConfig(), { fetchImpl, synthesize: injectedTts, logger = console } = {}) {
   const synthesize = injectedTts || await loadTts(config, { fetchImpl });
   let active = 0, sequence = 0;
+  const handleCall = createCall(config, { fetchImpl, synthesize: injectedTts, logger });
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -69,6 +74,7 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
       } catch { json(500, { error: 'Could not load application.' }); }
       return;
     }
+    if (await handleCall(req, res, path)) return;
     if (path !== '/api/process') { json(404, { error: 'Not found.' }); return; }
     if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); json(405, { error: 'Use POST.' }); return; }
     const expectedOrigin = config.origin || `http://${req.headers.host}`;
