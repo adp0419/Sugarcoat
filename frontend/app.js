@@ -374,6 +374,17 @@ function diffWords(a, b) {
   return ops;
 }
 
+// Backend reasons may be codes ("self_correction") or sentences; show codes in plain English.
+const REASON_TEXT = {
+  filler: "Removed filler words", repetition: "Removed a repeated word", self_correction: "You corrected yourself, so only the final version is kept",
+  false_start: "Dropped a false start", restructure: "Reworded for clarity", incomplete: "Tidied an unfinished phrase", grammar: "Fixed grammar", hedge: "Kept your hedge",
+};
+function humanReason(r) {
+  const key = String(r || "").trim().toLowerCase();
+  if (REASON_TEXT[key]) return REASON_TEXT[key];
+  return /^[a-z_]+$/.test(key) ? key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : r;
+}
+
 // Pick the backend edit whose text overlaps this hunk the most.
 function reasonFor(del, ins, edits, edited) {
   const words = (s) => new Set(s.split(/\s+/).map(norm).filter(Boolean));
@@ -384,7 +395,7 @@ function reasonFor(del, ins, edits, edited) {
     let sc = 0; D.forEach((w) => { if (f.has(w)) sc++; }); I.forEach((w) => { if (t.has(w)) sc++; });
     if (sc > score) { score = sc; best = e; }
   }
-  if (best) return best.reason;
+  if (best) return humanReason(best.reason);
   return edited ? "Changed by you" : "Tidied by VoiceFlow";
 }
 

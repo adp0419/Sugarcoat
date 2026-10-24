@@ -38,5 +38,5 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] 2  side-by-side transcripts + LCS diff with reason chips (2026-10-23)
 - [x] T3-cp4 decisions panel, guard panel, trace panel (2026-10-23)
 - [x] 3  approve + chained playback, edit re-check, simulate bad rewrite, all UI states (2026-10-23, verified in headless Chrome against offline mock; real server pending)
-- [ ] 4  integrate on real backend
+- [x] 4  integrated on real backend in MOCK=1 (port 8003): full flow + keyboard-only run pass in headless Chrome (2026-10-23); real-API run pending
 - [ ] 5  polish, "Simulate bad rewrite" button, README screenshots
