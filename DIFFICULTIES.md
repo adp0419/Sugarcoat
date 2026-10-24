@@ -1,7 +1,13 @@
-# DIFFICULTIES
+# Difficulties
 
-Each terminal logs under its own heading.
+Problems we hit, what we tried, and what we did. Each terminal appends only under its own heading.
 
-## T1 core backend
-- **Gemini key rejected (401 UNAUTHENTICATED, reason ACCESS_TOKEN_TYPE_UNSUPPORTED)** — 2026-10-23. `GEMINI_API_KEY` in `.env` starts with `AQ.` (53 chars); AI Studio API keys start with `AIza`. Looks like an OAuth/other token, not an AI Studio key. Fix: create a key at aistudio.google.com/apikey. Meanwhile real-mode rewrite fails over to the deterministic minimal rung and MOCK=1 covers UI work.
-- **Python 3.13 / no ffmpeg** — machine had no python3.11 or ffmpeg; used 3.13 venv (all deps install fine) and `brew install ffmpeg`.
+## Terminal 1 — backend / pipeline
+
+- **Gemini key rejected (401 UNAUTHENTICATED, ACCESS_TOKEN_TYPE_UNSUPPORTED)** — 2026-10-23. `GEMINI_API_KEY` in `.env` starts with `AQ.` (53 chars); AI Studio API keys start with `AIza`, so this looks like an OAuth-style token. Fix: create a key at aistudio.google.com/apikey. Until then real-mode rewrite falls to the deterministic minimal rung; MOCK=1 covers UI work.
+- **No python3.11 / ffmpeg on the machine** — used a 3.13 venv (all deps install fine) and `brew install ffmpeg`.
+
+## Terminal 2 — ASR / guard / eval
+
+## Terminal 3 — frontend / docs
+
