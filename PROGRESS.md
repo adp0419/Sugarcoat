@@ -24,7 +24,7 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [ ] 5  Makefile, pinned requirements.txt, .env.example
 
 ## T2 guard / decide / voice
-- [ ] 1  guard.py deterministic checks + unit tests (>=25 cases)
+- [x] 1  guard.py deterministic checks + unit tests (42 cases; `check_rules` sync, `check` async contract wrapper) (2026-10-23 23:46)
 - [ ] 2  decide.py (OpenAI Decisions: analysis + per-sentence)
 - [ ] 2  voice.py (Twinly speak, chunking, cache)
 - [ ] 3  guard Decisions verifier pass (combined verdict)
