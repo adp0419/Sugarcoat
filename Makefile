@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PORT ?= 8000
 
-.PHONY: setup run mock test lint warm
+.PHONY: setup run mock test eval lint warm
 
 setup:  ## venv + deps (needs ffmpeg: brew install ffmpeg)
 	python3 -m venv .venv
@@ -19,6 +19,9 @@ mock:  ## everything stubbed from fixtures/
 
 test:  ## no network
 	MOCK=1 $(PY) -m pytest -q
+
+eval:  ## text-only eval table; real APIs where keys allow (add ARGS=--offline for no network)
+	$(PY) eval/run_eval.py $(ARGS)
 
 lint:
 	$(PY) -m compileall -q backend

@@ -40,8 +40,10 @@ The browser only ever talks to this server. Twinly, OpenAI and Gemini are called
 ## Quickstart
 
 ```bash
-make setup              # venv + dependencies (installs ffmpeg hints if missing)
-cp .env.example .env    # then fill in your own keys
+brew install ffmpeg     # needed on your PATH
+make setup              # venv + dependencies; creates .env from .env.example if you have none
+                        # then open .env and fill in your own keys
+make warm               # one-time download of the speech-recognition weights
 make mock               # try everything with recorded sample data, no keys needed
 make run                # real services, http://localhost:8000
 ```
@@ -95,10 +97,10 @@ VoiceFlow is MIT licensed (see `LICENSE`). **CrisperWhisper model weights are li
 
 | Technology | Released | Role in VoiceFlow | One difficulty |
 |---|---|---|---|
-| OpenAI Decisions API | public beta Oct 6 2026 | routes and scores: edit predicates, mode, register; second-opinion verifier | TODO fill from DIFFICULTIES.md |
-| Gemma 4 (via Gemini API) | Apr 2 2026 | the edit engine, three modes | TODO |
-| CrisperWhisper | VERIFY exact date | verbatim ASR that keeps fillers | TODO |
-| Twinly Developer API | VERIFY release date | speaks the approved text in your own voice | TODO |
+| OpenAI Decisions API | public beta Oct 6 2026 | routes and scores: edit predicates, mode, register; second-opinion verifier | docs and reality differed on question limits (settled at 400 per call by live validation errors); the pipeline degrades to rules-only when the API is unavailable |
+| Gemma 4 (via Gemini API) | Apr 2 2026 | the edit engine, three modes | must go through the Gemini API for the MLH prize; key and auth-type problems are logged in DIFFICULTIES.md |
+| CrisperWhisper | VERIFY exact date | verbatim ASR that keeps fillers | newer `transformers` 5.x breaks word timestamps, so it is pinned below 5; weights are non-commercial and not bundled |
+| Twinly Developer API | VERIFY release date | speaks the approved text in your own voice | job errors such as `voice_not_set_up` arrive inside an HTTP 200 body, so the client checks job status, not just the HTTP code |
 
 See `DIFFICULTIES.md` for the problems we hit.
 

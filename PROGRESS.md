@@ -10,7 +10,7 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 |----------|-------------|--------|--------------|
 | T1 core | backend/models.py, config.py, main.py, asr.py, rewrite.py, __init__.py, fixtures/, requirements.txt, Makefile, .env.example, PROGRESS.md | 90% | MOCK=1 full contract OK; real ASR+guard OK; blocked on valid GEMINI_API_KEY for real Gemma |
 | T2 guard/decide/voice | backend/guard.py, decide.py, voice.py, tests/ | 90% | code + tests done; BLOCKED on keys for G1/G2 (Twinly voice clone not built; OpenAI key has no credits) |
-| T3 frontend | frontend/ | 0% | waiting on T1 contract |
+| T3 frontend | frontend/ | 90% | UI + keyboard pass done against MOCK=1; real-API run, GIF/screenshots pending |
 
 ## T1 core backend + contract
 - [x] 0  PROGRESS.md (2026-10-23)
@@ -29,7 +29,6 @@ Phases: 0 skeleton -> 1 MOCK + ASR + guard basics + UI skeleton -> 2 rewrite + v
 - [x] 2  split.py (sentences + <=550 chunk packer) (2026-10-23 23:50)
 - [x] 2  voice.py client + 20 tests + MOCK path (2026-10-23 23:50). G1 PARTIAL: real call returns voice_not_set_up; Mac owner must Build my clone, then re-run `python -m backend.voice "Hello, this is a test."` once
 - [x] 3  guard Decisions verifier pass: `guard.check` runs rules + `decide.verify` in parallel, offline degrade (5 combined tests) (2026-10-23 23:55)
-- [ ] 4  verified on real APIs, fixtures saved
 - [x] 5  eval/utterances.json (8 cases) + eval/run_eval.py, `--offline` works (2026-10-23 23:53)
 - [ ] 4  verified on real APIs (needs: Twinly "Build my clone"; OpenAI credits) then re-run G1/G2 once each
 

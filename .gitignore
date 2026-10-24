@@ -5,3 +5,8 @@ logs/
 __pycache__/
 *.pyc
 .DS_Store
+*.wav
+*.webm
+node_modules/
+models/
+.cache/
