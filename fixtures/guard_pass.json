@@ -1,1 +1,0 @@
-{"pass": true, "violations": [], "decisions_probs": {"meaning_preserved": 0.97, "added_new_information": 0.02, "dropped_hedge_or_uncertainty": 0.01, "changed_commitment_strength": 0.03, "changed_number_date_or_name": 0.01, "negation_changed": 0.0}, "verifier": "online"}

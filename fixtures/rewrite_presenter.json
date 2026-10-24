@@ -1,5 +1,0 @@
-{"rewrite": "Our meeting will take place on Monday at 5 PM. Everyone should attend.",
- "edits": [
-  {"from": "So, um, I just wanted to, uh, announce that we're going to have our meeting on", "to": "Our meeting will take place on", "reason": "restructure"},
-  {"from": "Friday—actually, sorry, ", "to": "", "reason": "self_correction"},
-  {"from": ", and, um, everyone should be there.", "to": ". Everyone should attend.", "reason": "restructure"}]}

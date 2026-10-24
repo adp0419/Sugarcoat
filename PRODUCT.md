@@ -1,9 +1,46 @@
-# VoiceFlow
+# VoiceFlow Lite
 
-VoiceFlow lets someone record natural speech, review a clearer version, then explicitly approve playback in their own cloned voice. It is an optional assist for presenters, students, non-native speakers, and people with disfluencies.
+<!-- impeccable:product-schema 1 -->
 
-The core workflow is Speak → Review → Hear it. Recordings last up to 45 seconds. Live drafts are provisional; the review exposes the original transcript, word-level edits, reasons, and a meaning check. The text remains editable. Nothing is spoken before approval. Generated playback is labeled synthetic. Errors and service limitations must include clear recovery options.
+## Platform
 
-The frontend is static HTML, CSS, and vanilla JavaScript, served by FastAPI. Keep existing API contracts and keyboard controls. English is the supported language. Demo data is explicitly labeled. Do not add unsupported upload, history, account, or voice-selection controls.
+web
 
-The user requested a dark, technical frontend inspired by Vercel's website and design language: near-black surfaces, fine rules, restrained type, and high-contrast primary actions. Product operation takes priority over decorative effects.
+## Product Purpose
+
+Hold to record speech, release to clean the transcript, and automatically hear the final text. The current output remains available for local replay, seeking, and volume adjustment.
+
+## Users
+
+The user prioritizes recording, the cleaned transcript, and replay. No additional audience or usage context is assumed.
+
+## Operating Context
+
+A single Node.js server serves vanilla HTML, CSS, and JavaScript. There is no framework, build step, database, account system, or recording history. Localhost or HTTPS and a modern browser are required for microphone capture.
+
+## Capabilities and Constraints
+
+- Preserve the existing API contracts and provider configuration. Live processing uses Groq, Google, and Twinly; mock mode produces an example transcript and a test tone.
+- Hold the recording button or focus it and hold Space. Release to process. Cancel / Stop and Escape cancel processing or stop playback.
+- Preserve microphone permission handling, timeouts, cancellation, errors, optional VAD, autoplay recovery, native audio controls, and latency measurements.
+- The transcript is read-only. There is no approval, editing, download, history, or voice-selection workflow.
+- Only the current generated clip is kept in the browser. Starting another recording replaces it. Source audio is processed in memory.
+
+## Brand Commitments
+
+Retain the VoiceFlow Lite name and meaningful existing content. The user requests a dark, technical aesthetic inspired by Vercel: near-black surfaces, restrained typography, fine borders, high-contrast actions, and one unified ruled workspace. No decorative gradients, glass effects, excessive shadows, or unnecessary motion.
+
+## Product Principles
+
+- Recording, transcript, and replay form the primary workflow.
+- Keep the recording action obvious and related content together.
+- Expose errors with recovery instructions and retain keyboard access.
+- Present actual provider and application states without invented capabilities or measurements.
+
+## Accessibility & Inclusion
+
+Visible keyboard focus, reduced-motion support, responsive layouts, usable 200% zoom, text contrast of at least 4.5:1, and control/focus contrast of at least 3:1 are explicit requirements.
+
+## Evidence on Hand
+
+The existing implementation, README, and automated tests document the supported workflow and limits. The user's design brief supplies the visual constraints and palette.

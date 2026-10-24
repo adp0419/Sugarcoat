@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: voiceflow-lite
+    runtime: node
+    plan: free
+    buildCommand: node --check server.mjs
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: HOST
+        value: 0.0.0.0
+      - key: APP_MODE
+        value: mock
+      - key: TTS_PROVIDER
+        value: mock
