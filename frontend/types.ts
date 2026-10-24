@@ -49,6 +49,8 @@ export interface Job {
   trace: TraceEntry[];
   timings: { total_ms: number };
   notes?: string[]; // e.g. "Self-corrections fixed by rules (AI editor unavailable)"
+  protected_terms?: string[];
+  error?: { code: string; message: string; hint: string } | null;
 }
 
 // POST /api/live (multipart: audio = cumulative recording so far, seq). 429 {error:{code:"busy"}} = skip this tick.

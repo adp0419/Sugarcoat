@@ -1,7 +1,7 @@
 """Test-only stand-in for the VoiceFlow backend that misbehaves on purpose (hangs, stalls, fallbacks, speak errors).
 
 Serves ../ (the frontend) and fakes /api/* per docs/md/10. Pick a scenario with
-POST /__scenario {"name": "..."}; each new job snapshots the current scenario.
+POST /__scenario {"name": "...", "health": {...}?, "live": "ok|busy|404"?}; each new job snapshots the current scenario.
 Not used by the app; run from the repo root:  .venv/bin/python frontend/e2e/scenario_server.py --port 8002
 """
 import argparse
@@ -21,7 +21,8 @@ REWRITE = "My name is Ariane Patel, and the team meeting is on Monday at five p 
 MINIMAL = "So my name is Ariane Patel and the team meeting is on Friday, no wait, Monday at five p m."
 
 app = FastAPI()
-state = {"scenario": "ok"}
+HEALTH_OK = {"asr_loaded": True, "decisions": "ok", "gemma": "ok", "twinly": {"online": True, "voice_ready": True}, "mock": False}
+state = {"scenario": "ok", "health": HEALTH_OK, "live": "ok", "live_calls": [], "live_inflight": 0, "live_max": 0}
 jobs: dict[str, dict] = {}
 
 
@@ -63,6 +64,15 @@ def build(name, jid, terms):
         ev += [("stage", {"stage": "rewrite", "status": "start"}), ("stage", {"stage": "rewrite", "status": "error", "ms": 16000, "preview": "ServerError: 500 INTERNAL"}),
                ("stage", {"stage": "rewrite", "status": "fallback", "preview": "Falling back to minimal filler removal (no AI)"}),
                ("stage", {"stage": "rewrite", "status": "done", "ms": 3}), ("stage", {"stage": "guard", "status": "done", "ms": 40})]
+    elif name == "fallback-selfcorrected":  # Gemini out of credits -> deterministic rung resolves "Friday, no wait, Monday"
+        fixed = "My name is Ariane Patel and the team meeting is on Monday at five p m."
+        done.update(rung="minimal", rewrite=fixed, guard=guard(),
+                    edits=[{"from": "So um", "to": "", "reason": "filler"}, {"from": "uh Friday, no wait,", "to": "", "reason": "self_correction"}],
+                    notes=["AI editor unavailable: Gemini key has no credits (402) - add billing in AI Studio",
+                           "Self-corrections fixed by rules (AI editor unavailable)"],
+                    trace=head + [tr("decide", ms=900, model="gpt-6-luna"),
+                                  tr("rewrite", False, 300, "gemma-4-26b-a4b-it", error="ClientError: 402 RESOURCE_EXHAUSTED prepayment credits are depleted"),
+                                  tr("rewrite", True, 3, "deterministic", preview=fixed), tr("guard", True, 40, "deterministic+decisions", preview="PASS")])
     elif name == "fallback-original":
         done.update(rung="original", rewrite=VERBATIM, guard=guard(), notes=["ladder: no changes made"],
                     trace=head + [tr("decide", ms=900, model="gpt-6-luna"),
@@ -84,13 +94,42 @@ def build(name, jid, terms):
 
 @app.post("/__scenario")
 async def set_scenario(req: Request):
-    state["scenario"] = (await req.json())["name"]
+    body = await req.json()
+    state["scenario"] = body["name"]
+    state["health"] = {**HEALTH_OK, **body.get("health", {})}
+    state["live"] = body.get("live", "ok")
+    state.update(live_calls=[], live_max=0)
     return {"scenario": state["scenario"]}
+
+
+@app.get("/__live_calls")
+async def live_calls():
+    return {"calls": state["live_calls"], "max_inflight": state["live_max"]}
 
 
 @app.get("/api/health")
 async def health():
-    return {"asr_loaded": True, "decisions": "ok", "gemma": "ok", "twinly": {"online": True, "voice_ready": True}, "mock": False}
+    return state["health"]
+
+
+# Live draft per the round-3 contract: cumulative audio + seq -> rough text. "busy" answers 429 on every
+# other call (a pass already running); "404" pretends the endpoint has not landed.
+@app.post("/api/live")
+async def live(audio: UploadFile, seq: int = Form(...)):
+    data = await audio.read()
+    state["live_calls"].append({"seq": seq, "bytes": len(data), "webm_header": data[:4].hex() == "1a45dfa3"})
+    if state["live"] == "404":
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    if state["live"] == "busy" and seq % 2 == 0:
+        return JSONResponse({"error": {"code": "busy", "message": "A live pass is already running.", "hint": ""}}, status_code=429)
+    state["live_inflight"] += 1
+    state["live_max"] = max(state["live_max"], state["live_inflight"])
+    try:
+        await asyncio.sleep(1.2 if state["live"] == "slow" else 0.3)
+    finally:
+        state["live_inflight"] -= 1
+    words = VERBATIM.split()
+    return {"seq": seq, "text": " ".join(words[: min(len(words), seq * 5)]), "ms": 300, "final": False}
 
 
 @app.post("/api/process", status_code=202)
