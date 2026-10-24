@@ -70,13 +70,13 @@
 
   <div class="flow-switch">
     <div class="seg" role="radiogroup" aria-label="How to use VoiceFlow">
-      <label><input type="radio" name="flow" value="one" checked><span>One recording</span></label>
-      <label><input type="radio" name="flow" value="stage"><span>Stage mode</span></label>
+      <label><input type="radio" id="flow-one" name="flow" value="one" checked><span>One recording</span></label>
+      <label><input type="radio" id="flow-stage" name="flow" value="stage"><span>Stage mode</span></label>
     </div>
   </div>
 
   <!-- Stage mode: sentence by sentence, spoken a few seconds behind you (POST /api/stage/segment) -->
-  <section id="stage" class="step stage" data-status="current" aria-labelledby="h-stage" hidden>
+  <section id="stage" class="stage" aria-labelledby="h-stage" hidden>
     <header class="step-head">
       <h2 id="h-stage" tabindex="-1">Stage mode</h2>
     </header>

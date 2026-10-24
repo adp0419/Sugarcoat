@@ -439,11 +439,11 @@ def case_keyboard(b):
     pg = page(b, MOCK)
     pg.reload()
     order = []
-    for _ in range(6):
+    for _ in range(7):
         pg.keyboard.press("Tab")
         order.append(pg.evaluate("document.activeElement.id || document.activeElement.className"))
-    want = ["skip", "status-btn", "first-run-close", "record", "demo", "terms"]
-    check("keyboard: Tab order follows the page (header, then step 1)", order == want, str(order))
+    want = ["skip", "status-btn", "first-run-close", "flow-one", "record", "demo", "terms"]
+    check("keyboard: Tab order follows the page (header, flow switch, then step 1)", order == want, str(order))
     pg.focus("#status-btn"); pg.keyboard.press("Enter")
     check("keyboard: Enter opens the status popover", pg.is_visible("#status-pop"))
     pg.keyboard.press("Escape")
