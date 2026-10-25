@@ -165,6 +165,7 @@ Off unless `SUPABASE_URL` is set; without it everything above works as before. W
 
 - `/` and `/call` require signing in (email + password). The server proxies Supabase Auth, so the browser never talks to Supabase and the CSP is unchanged. Only emails listed in `CALL_USERS` (`aryan:you@x.com,rohit:them@y.com`) can sign in or create an account.
 - In `/call` → Settings, each person pastes their Twinly key. The server checks it with Twinly's free `GET /v1/me` (it must have the `voice` scope), encrypts it with `APP_ENCRYPTION_KEY` (AES-256-GCM) and stores it in `public.profiles`. A saved key wins over the `.env` keys; with none saved, the `.env` keys are used.
+- Chat history: the cleaned text of Aryan↔Rohit voice messages and call lines is saved in `public.messages` and reloads into the thread on sign-in. No audio or raw transcripts are stored, and test-contact chats are not saved. Without that table, delivery works as before and history stays empty.
 - Legacy `?as=…&t=…` token links (`call-sim`, `call-e2e.py`) keep working whenever `CALL_TOKEN` is set.
 
 Setup: create a Supabase project, run [supabase/schema.sql](supabase/schema.sql) in its SQL editor, then fill the Supabase section of `.env` (see `.env.example`). Twinly offers no OAuth, so pasting a key is the only way to connect it.

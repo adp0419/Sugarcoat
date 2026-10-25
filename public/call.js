@@ -458,6 +458,35 @@ async function openStream() {
   }
 }
 
+/* ---------- Saved history ---------- */
+// Earlier messages with your peer, saved on the server when accounts are on. They go
+// above anything that arrived while loading; ids already on screen are skipped.
+async function loadHistory(peer) {
+  let rows;
+  try {
+    const response = await fetch(withToken('/api/call/history'), { cache: 'no-store' });
+    if (!response.ok) return;
+    rows = (await response.json()).messages;
+  } catch { return; }
+  if (!Array.isArray(rows) || !rows.length || peer !== peerOf(me)) return;
+  const box = threadFor(peer), first = box.firstChild;
+  for (const row of rows) {
+    if (!row?.id || box.querySelector(`[data-id="${CSS.escape(String(row.id))}"]`)) continue;
+    const entry = addEntry(row.from === me ? 'you' : 'peer', String(row.text || ''), '', '', row.kind === 'call' ? 'call' : 'message', peer);
+    entry.li.dataset.id = row.id;
+    const at = new Date(row.at), time = entry.li.querySelector('time');
+    if (time && !Number.isNaN(at.getTime())) {
+      time.dateTime = at.toISOString();
+      const sameDay = at.toDateString() === new Date().toDateString();
+      time.textContent = sameDay ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : at.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+    box.insertBefore(entry.li, first);
+  }
+  countEntries();
+  if (box === log) log.scrollTop = log.scrollHeight;
+}
+
 /* ---------- Sign in / out ---------- */
 function showLogin(message = '') {
   showPassword(false);
@@ -480,6 +509,7 @@ function enterApp(who) {
   if (!window.fetch || !window.AudioContext || !window.MediaRecorder) setLinkError('This browser can’t run calls. Use current Chrome, Safari, or Firefox.');
   else if (!window.isSecureContext) setLinkError('The microphone only works on localhost or HTTPS. Open the link you were given.');
   openStream(); refresh();
+  if (accounts) loadHistory(peer);
 }
 async function signIn(event, create = false) {
   event?.preventDefault();
@@ -725,7 +755,7 @@ async function sendRecording(run, mimeType) {
       else if (event.type === 'cleaned') {
         cleanedText = String(event.text || '').trim();
         if (cleanedText) {
-          entry.id = event.id ?? null; ownEntries.set(entry.id, entry);
+          entry.id = event.id ?? null; ownEntries.set(entry.id, entry); if (entry.id) entry.li.dataset.id = entry.id;
           const early = turns.get(entry.id); if (early?.own && !early.entry) early.entry = entry;
           showEdits(entry, String(event.raw || entry.raw || ''), cleanedText); }
         else { removeEntry(entry); entry = null; }
@@ -764,7 +794,8 @@ async function sendRecording(run, mimeType) {
 const senderOf = data => { const from = String(data.from || ''); return from !== me && (NAMES[from] || isContact(from)) ? from : ''; };
 function onMessage(data) {
   const from = senderOf(data); if (!from) return;
-  addEntry('peer', String(data.text || ''), '', '', 'message', from);
+  const entry = addEntry('peer', String(data.text || ''), '', '', 'message', from);
+  if (data.id) entry.li.dataset.id = data.id;
   bumpUnread(from);
 }
 function turnFor(id, from = chat) {
@@ -781,7 +812,7 @@ function onCaption(data) {
   if (data.id == null || !from || turns.has(data.id)) return;
   const turn = turnFor(data.id, from), live = inCall && from === chat;
   turn.entry = addEntry('peer', String(data.text || ''), live ? 'Waiting' : 'Said in the call', live ? 'waiting' : '', 'call', from);
-  turn.entry.cleaned = String(data.text || '');
+  turn.entry.cleaned = String(data.text || ''); turn.entry.li.dataset.id = data.id;
   refresh(); pump();
 }
 function onClip(data) {

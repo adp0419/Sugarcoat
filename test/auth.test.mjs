@@ -16,7 +16,8 @@ const env = {
 // In-memory Supabase Auth + PostgREST + Twinly /me, enough for the routes under test.
 function fakeBackend() {
   const users = new Map([['aryan@example.com', 'u-aryan'], ['rohit@example.com', 'u-rohit'], ['eve@example.com', 'u-eve']]);
-  const rows = new Map(), calls = [];
+  const rows = new Map(), calls = [], messages = [];
+  let messagesTable = true;
   const reply = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const session = email => ({ access_token: `tok:${email}`, refresh_token: `ref:${email}`, expires_in: 3600, user: { id: users.get(email), email } });
   async function fetchImpl(input, init = {}) {
@@ -45,9 +46,18 @@ function fakeBackend() {
       if (method === 'POST') { rows.set(body.id, { ...body }); return reply(201, [rows.get(body.id)]); }
       if (method === 'PATCH') { Object.assign(rows.get(id), body); return reply(204); }
     }
+    if (url.pathname === '/rest/v1/messages') {
+      assert.equal(init.headers.apikey, 'sb_secret_test');
+      if (!messagesTable) return reply(404, { code: 'PGRST205' });
+      if (method === 'POST') { messages.push(body); return reply(201); }
+      const pair = url.searchParams.get('from_handle');
+      assert.equal(pair, url.searchParams.get('to_handle'));
+      return reply(200, messages.filter(m => pair.includes(m.from_handle) && pair.includes(m.to_handle))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    }
     return reply(404, {});
   }
-  return { fetchImpl, rows, calls };
+  return { fetchImpl, rows, calls, messages, dropMessagesTable() { messagesTable = false; } };
 }
 
 async function fixture(t, overrides = {}, dependencies = {}) {
@@ -175,4 +185,27 @@ test('call relay: legacy token links still work with accounts on', async t => {
   const poll = await fetch(`${base}/api/call/poll?as=rohit&t=legacy`);
   assert.equal(poll.status, 200);
   assert.equal((await poll.json()).you, 'rohit');
+});
+
+test('chat history: Aryan↔Rohit text is saved and comes back in order; test contacts are not saved', async t => {
+  const { base, backend, signIn } = await fixture(t, { callToken: '' });
+  const aryan = await signIn('aryan@example.com'), rohit = await signIn('rohit@example.com');
+  const call = (path, token, init = {}) => fetch(`${base}${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`, init);
+  const send = async (token, to = '') => {
+    const response = await call(`/api/call/message${to ? `?to=${to}` : ''}`, token, { method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: Buffer.from('audio') });
+    assert.equal(response.status, 200); await response.text(); await new Promise(resolve => setTimeout(resolve, 5));
+  };
+  await call('/api/call/poll', aryan); await call('/api/call/poll', rohit); // both online
+  await send(aryan); await send(rohit); await send(aryan, 'maya');
+  await new Promise(resolve => setImmediate(resolve)); // saves are fire-and-forget
+
+  assert.equal(backend.messages.length, 2, 'the test-contact message is not saved');
+  const history = await (await call('/api/call/history', rohit)).json();
+  assert.deepEqual(history.messages.map(m => [m.from, m.kind]), [['aryan', 'message'], ['rohit', 'message']]);
+  assert.ok(history.messages.every(m => m.id && m.text && m.at));
+  assert.equal((await fetch(`${base}/api/call/history`)).status, 401);
+
+  backend.dropMessagesTable(); // table not created yet: delivery still works, history is just empty
+  await send(aryan);
+  assert.deepEqual((await (await call('/api/call/history', aryan)).json()).messages, []);
 });
