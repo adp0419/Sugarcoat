@@ -465,6 +465,48 @@ async function openStream() {
   }
 }
 
+/* ---------- Test contacts' unread messages ---------- */
+// Sample work messages waiting in the test contacts' threads; the unread badge is
+// their count. [minutes ago, text] or, in the group, [minutes ago, text, member].
+const SAMPLE_MESSAGES = {
+  maya: [
+    [52, 'Morning! Just sent you the Q4 launch deck. Can you take a look before the 2 PM sync?'],
+    [50, 'Slides 6 through 9 still need the latest numbers from the pilot.'],
+    [47, 'Also, legal signed off on the pricing page copy, so we’re clear to ship it Friday.'],
+    [45, 'Happy to walk through it together if that’s easier. I’m free after 3.'],
+  ],
+  jordan: [
+    [38, 'Heads up, the client moved our review to Thursday at 10. I updated the invite and attached the revised agenda.'],
+  ],
+  dev: [
+    [95, 'Deployed build 2.4.1 to staging. Release notes are pinned in the channel.', 'Marcus Lee'],
+    [90, 'Running the regression suite now. I’ll post results within the hour.', 'Aisha Rahman'],
+    [82, 'Found a flaky test in checkout. It’s not blocking; filed it as PAY-212.', 'Marcus Lee'],
+    [74, 'Code review is up for the auth refactor whenever someone has a minute.', 'Ethan Cho'],
+    [41, 'Regression suite passed, 412 of 412. Staging looks good.', 'Aisha Rahman'],
+    [33, 'Updated the API docs for the new endpoints and linked them in the PR.', 'Nina Torres'],
+    [20, 'If there are no objections, I’ll promote to production at 4 PM. Shout if you need more time.', 'Marcus Lee'],
+  ],
+  leah: [
+    [64, 'Just sent over the signed SOW for the Northwind project. The countersigned copy is in the shared drive.'],
+    [61, 'Can you confirm the deliverable dates in section 3 work for your team? I need to reply to them by end of day.'],
+  ],
+};
+function seedSampleMessages() {
+  for (const [id, lines] of Object.entries(SAMPLE_MESSAGES)) {
+    for (const [minutesAgo, text, member] of lines) {
+      const entry = addEntry('peer', text, '', '', 'message', id);
+      const at = new Date(Date.now() - minutesAgo * 60000), time = entry.li.querySelector('time');
+      time.dateTime = at.toISOString(); time.textContent = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      if (member) entry.li.querySelector('.who').textContent = `${member} · Dev Team`;
+    }
+    const item = document.querySelector(`.dm-item[data-chat="${id}"]`);
+    let badge = item?.querySelector('.badge');
+    if (item && !badge) { badge = document.createElement('span'); badge.className = 'badge'; item.append(badge); }
+    if (badge) { badge.textContent = lines.length; badge.setAttribute('aria-label', `${lines.length} unread`); }
+  }
+}
+
 /* ---------- Saved history ---------- */
 // Your saved conversation with your peer (accounts only), rebuilt the way it looked
 // live: messages with their status, and each of your calls as its collapsed record.
@@ -535,7 +577,7 @@ function enterApp(who) {
   $('tileMeName').textContent = `${NAMES[me]} (you)`; setAvatar($('tileMeAvatar'), me);
   $('dmPeer').dataset.chat = peer; threads.set(peer, $('log'));
   toggleAdd(false); renderPending();
-  chat = ''; openChat(peer);
+  chat = ''; openChat(peer); seedSampleMessages();
   setConnection('Connecting…', 'wait');
   if (!window.fetch || !window.AudioContext || !window.MediaRecorder) setLinkError('This browser can’t run calls. Use current Chrome, Safari, or Firefox.');
   else if (!window.isSecureContext) setLinkError('The microphone only works on localhost or HTTPS. Open the link you were given.');
