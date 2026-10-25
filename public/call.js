@@ -474,6 +474,7 @@ function enterApp(who) {
   $('peerNameRail').textContent = NAMES[peer]; setAvatar($('peerAvatar'), peer);
   $('tileMeName').textContent = `${NAMES[me]} (you)`; setAvatar($('tileMeAvatar'), me);
   $('dmPeer').dataset.chat = peer; threads.set(peer, $('log'));
+  toggleAdd(false); renderPending();
   chat = ''; openChat(peer);
   setConnection('Connecting…', 'wait');
   if (!window.fetch || !window.AudioContext || !window.MediaRecorder) setLinkError('This browser can’t run calls. Use current Chrome, Safari, or Firefox.');
@@ -521,6 +522,48 @@ function logout() {
   $('username').value = ''; showLogin();
   $('username').focus();
 }
+
+/* ---------- Connections: add by email ---------- */
+// A request shows greyed out as Pending until the other person adds you back. There is no
+// backend for this yet, so pending requests live in this browser, per signed-in person.
+const pendingKey = () => `vf-pending-${me}`;
+const readPending = () => { try { return JSON.parse(lsGet(pendingKey()) || '[]'); } catch { return []; } };
+const nameFromEmail = email => email.split('@')[0].split(/[._-]+/).filter(Boolean)
+  .map(word => word[0].toUpperCase() + word.slice(1)).join(' ') || email;
+function renderPending() {
+  for (const row of document.querySelectorAll('.dm-list .pending-row')) row.remove();
+  for (const email of readPending()) {
+    const name = nameFromEmail(email);
+    const li = document.createElement('li'); li.className = 'pending-row';
+    const row = document.createElement('div'); row.className = 'dm-item pending'; row.title = `Waiting for ${email} to add you back`;
+    const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.setAttribute('aria-hidden', 'true'); avatar.textContent = name[0];
+    const text = document.createElement('span'); text.className = 'dm-text';
+    const label = document.createElement('span'); label.className = 'dm-name'; label.textContent = name;
+    const state = document.createElement('span'); state.className = 'dm-state'; state.textContent = 'Pending';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'icon-button cancel-pending';
+    cancel.setAttribute('aria-label', `Cancel request to ${email}`); cancel.title = 'Cancel request';
+    cancel.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+    cancel.addEventListener('click', () => { lsSet(pendingKey(), JSON.stringify(readPending().filter(item => item !== email))); renderPending(); $('addBtn').focus(); });
+    text.append(label, state); row.append(avatar, text, cancel); li.append(row);
+    document.querySelector('.dm-list').append(li);
+  }
+}
+function toggleAdd(open = $('addForm').hidden) {
+  $('addForm').hidden = !open; $('addBtn').setAttribute('aria-expanded', String(open)); $('addNote').textContent = '';
+  if (open) $('addEmail').focus();
+}
+$('addBtn').addEventListener('click', () => toggleAdd());
+$('addForm').addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleAdd(false); $('addBtn').focus(); } });
+$('addForm').addEventListener('submit', event => {
+  event.preventDefault();
+  const email = $('addEmail').value.trim().toLowerCase(), note = text => { $('addNote').textContent = text; };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) return note('Enter a full email address.');
+  if (email === String(getSession()?.email || '').toLowerCase()) return note('That’s your own email.');
+  if (readPending().includes(email)) return note(`${email} is already pending.`);
+  lsSet(pendingKey(), JSON.stringify([...readPending(), email]));
+  $('addEmail').value = ''; renderPending();
+  note(`Request sent. ${nameFromEmail(email)} shows as Pending until they add you back.`);
+});
 
 /* ---------- Conversations ---------- */
 const PEER_HINT = $('emptyHint').textContent;

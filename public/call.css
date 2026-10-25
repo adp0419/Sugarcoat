@@ -411,3 +411,24 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
 @media (max-width: 759px) and (prefers-reduced-motion: reduce) {
   .rail, .app[data-drawer="open"] .rail { transition: none; }
 }
+
+/* Connections heading with the add (+) button, and pending requests ------- */
+.rail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: var(--space-3) var(--space-2) var(--space-2) var(--space-3); }
+.rail-head .rail-heading { margin: 0; }
+.add-button { width: 30px; height: 30px; }
+.add-button svg { width: 18px; height: 18px; transition: transform 160ms ease; }
+.add-button[aria-expanded="true"] svg { transform: rotate(45deg); }
+.add-form { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 var(--space-2) var(--space-2); }
+.add-form[hidden] { display: none; }
+.add-form input { flex: 1; min-width: 0; min-height: 38px; padding: 6px 10px; border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--card); color: var(--foreground); font: inherit; font-size: 14px; }
+.add-form .secondary { min-height: 38px; padding: 6px 14px; }
+.add-form .hint { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 17px; }
+.add-form .hint:empty { display: none; }
+.dm-item.pending { cursor: default; }
+.dm-item.pending:hover { background: transparent; }
+.dm-item.pending .avatar, .dm-item.pending .dm-name { opacity: .5; }
+.dm-item.pending .dm-state { font-style: italic; }
+.cancel-pending { width: 28px; height: 28px; flex: none; }
+.cancel-pending svg { width: 16px; height: 16px; }
+@media (max-width: 759px) { .rail-head .rail-heading { display: block; } }
+@media (prefers-reduced-motion: reduce) { .add-button svg { transition: none; } }

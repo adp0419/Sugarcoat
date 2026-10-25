@@ -42,12 +42,24 @@
 
   <!-- App -->
   <div id="app" class="app" hidden>
-    <nav id="rail" class="rail" aria-label="Direct messages">
+    <nav id="rail" class="rail" aria-label="Connections">
       <div class="rail-brand brand">
         <svg class="mark" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v4m5-9v14m5-18v22m5-18v14m5-9v4"/></svg>
         <span>Sugarcoat</span>
       </div>
-      <h2 class="rail-heading">Direct messages</h2>
+      <div class="rail-head">
+        <h2 class="rail-heading">Connections</h2>
+        <button id="addBtn" class="icon-button add-button" type="button" aria-label="Add a connection" title="Add a connection" aria-expanded="false" aria-controls="addForm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <!-- Add by email. Requests stay Pending until the other person adds you back (no backend yet). -->
+      <form id="addForm" class="add-form" hidden novalidate>
+        <label for="addEmail" class="visually-hidden">Email address to connect with</label>
+        <input id="addEmail" type="email" placeholder="Add by email" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button class="secondary" type="submit">Add</button>
+        <p id="addNote" class="hint" role="status"></p>
+      </form>
       <ul class="dm-list">
         <li><button id="dmPeer" class="dm-item" type="button" aria-current="page">
           <span class="avatar" id="peerAvatar" aria-hidden="true"></span>
