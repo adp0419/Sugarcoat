@@ -9,11 +9,13 @@ import { preClean } from './lib/cleanup.mjs';
 import { AUDIO_TYPES, transcribe, cleanWithGoogle } from './lib/providers.mjs';
 import { loadTts, validateAudio } from './lib/tts/index.mjs';
 import { createCall } from './lib/call.mjs';
+import { createAuth } from './lib/auth.mjs';
 
 const files = new Map([
   ['/', ['public/index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['public/app.js', 'text/javascript; charset=utf-8']],
   ['/playback.js', ['public/playback.js', 'text/javascript; charset=utf-8']],
+  ['/auth.js', ['public/auth.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['public/style.css', 'text/css; charset=utf-8']],
   ['/call', ['public/call.html', 'text/html; charset=utf-8']],
   ['/call.js', ['public/call.js', 'text/javascript; charset=utf-8']],
@@ -46,7 +48,9 @@ function readAudio(req, limit, signal) {
 export async function createApp(config = readConfig(), { fetchImpl, synthesize: injectedTts, logger = console } = {}) {
   const synthesize = injectedTts || await loadTts(config, { fetchImpl });
   let active = 0, sequence = 0;
-  const handleCall = createCall(config, { fetchImpl, synthesize: injectedTts, logger });
+  const auth = createAuth(config, { fetchImpl, logger });
+  await auth.preload();
+  const handleCall = createCall(config, { fetchImpl, synthesize: injectedTts, logger, auth });
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -62,7 +66,7 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
     if (req.method === 'GET' && path === '/api/config') {
       json(200, { mode: config.mode, tts: config.ttsProvider, maxAudioBytes: config.maxAudioBytes,
         maxRecordSeconds: config.maxRecordSeconds, vadSilenceMs: config.vadSilenceMs,
-        vadThreshold: config.vadThreshold, timeoutMs: config.timeoutMs });
+        vadThreshold: config.vadThreshold, timeoutMs: config.timeoutMs, auth: auth.enabled });
       return;
     }
     if (req.method === 'GET' && path === '/healthz') { json(200, { ok: true }); return; }
@@ -74,6 +78,7 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
       } catch { json(500, { error: 'Could not load application.' }); }
       return;
     }
+    if (await auth.handleAuth(req, res, path, json)) return;
     if (await handleCall(req, res, path)) return;
     if (path !== '/api/process') { json(404, { error: 'Not found.' }); return; }
     if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); json(405, { error: 'Use POST.' }); return; }
@@ -89,6 +94,12 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
     if (Number(req.headers['content-length']) > config.maxAudioBytes) {
       req.resume(); json(413, { error: 'Recording is too large.' }); return;
     }
+    // With accounts enabled, processing needs a signed-in user and uses their Twinly key.
+    let user = null;
+    try { user = await auth.userFrom(req); }
+    catch (error) { req.resume(); json(error.status || 401, { error: error.message, code: error.code }); return; }
+    if (auth.enabled && !user) { req.resume(); json(401, { error: 'Sign in first.', code: 'AUTH_REQUIRED' }); return; }
+    const twinlyKey = (user && (auth.twinlyKey(user.handle) || config.callKeys?.[user.handle])) || config.twinlyKey;
     const controller = new AbortController();
     const { signal } = controller;
     const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Client disconnected')); };
@@ -113,8 +124,9 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
       if (config.mode === 'live' && (!config.groqKey || !config.googleKey)) {
         throw new AppError('Live mode requires GROQ_API_KEY and GOOGLE_API_KEY on the server.', 503, 'MISSING_KEYS');
       }
-      if (config.ttsProvider === 'twinly' && !config.twinlyKey) {
-        throw new AppError('Set TWINLY_API_KEY on the server to enable Twinly cloned voice playback.', 503, 'TWINLY_NOT_CONFIGURED');
+      if (config.ttsProvider === 'twinly' && !twinlyKey) {
+        throw new AppError(user ? 'Add your Twinly key in Settings on the Comms page (/call) to hear your cloned voice.'
+          : 'Set TWINLY_API_KEY on the server to enable Twinly cloned voice playback.', 503, 'TWINLY_NOT_CONFIGURED');
       }
       const audio = await measure('receive', () => readAudio(req, config.maxAudioBytes, signal));
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -130,7 +142,7 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
       if (cleaned) {
         stage = 'ttsStream'; stageStart = performance.now();
         const result = await synthesize({ text: cleaned, voiceId: config.voiceId,
-          apiKey: config.twinlyKey, signal, onStatus: stage => send('status', { stage, timings }) });
+          apiKey: twinlyKey, signal, onStatus: stage => send('status', { stage, timings }) });
         validateAudio(result);
         await send('format', { format: result.format });
         let size = 0;

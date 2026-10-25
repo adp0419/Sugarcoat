@@ -2,6 +2,7 @@
 // joinable voice call (push-to-talk, heard in the speaker's cloned voice).
 // Talks to /api/call/* only. Playback is a small copy of the decode-and-schedule
 // idea in playback.js (which stays untouched); each clip is fetched by URL.
+import { getSession, signIn as accountSignIn, signOut, accessToken, authFetch } from '/auth.js';
 const $ = id => document.getElementById(id);
 const talk = $('talk'), record = $('record'), joinBtn = $('join'), leaveBtn = $('leave'), enableBtn = $('enable');
 const NAMES = { aryan: 'Aryan', rohit: 'Rohit' };
@@ -12,6 +13,10 @@ const INVALID_LINK = 'This link isn’t valid. Ask for a new one.';
 
 const params = new URLSearchParams(location.search);
 const token = params.get('t') || ''; // kept in memory only; never rendered
+// Accounts (Supabase) are on when the server says so. A legacy ?as=&t= link (tools, tests) still uses the token.
+const accounts = await fetch('/api/config').then(r => (r.ok ? r.json() : {})).then(c => !!c.auth).catch(() => false);
+const legacyLink = !!(token && params.get('as'));
+let viaSession = false; // this page is signed in with an account rather than the token link
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const ssGet = key => { try { return sessionStorage.getItem(key); } catch { return null; } };
 const ssSet = (key, value) => { try { value ? sessionStorage.setItem(key, value) : sessionStorage.removeItem(key); } catch {} };
@@ -363,10 +368,14 @@ async function listDevices() {
 }
 
 /* ---------- Connection ---------- */
-const withToken = path => `${path}${path.includes('?') ? '&' : '?'}as=${encodeURIComponent(me)}&t=${encodeURIComponent(token)}`;
+const withToken = path => `${path}${path.includes('?') ? '&' : '?'}as=${encodeURIComponent(me)}&` +
+  (viaSession ? `access_token=${encodeURIComponent(getSession()?.access_token || '')}` : `t=${encodeURIComponent(token)}`);
+// Keep the account session fresh; accessToken() refreshes shortly before expiry.
+setInterval(() => { if (viaSession) accessToken(); }, 30000);
 const postJson = (path, body) => fetch(withToken(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 function invalidLink() {
+  if (viaSession) { logout(); showLogin('Your session ended. Sign in again.'); return; }
   stopConnection(); connected = false;
   setConnection('Link not valid', 'error');
   setLinkError(INVALID_LINK);
@@ -436,8 +445,25 @@ function enterApp(who) {
   else if (!window.isSecureContext) setLinkError('The microphone only works on localhost or HTTPS. Open the link you were given.');
   openStream(); refresh();
 }
-function signIn(event) {
-  event.preventDefault();
+async function signIn(event, create = false) {
+  event?.preventDefault();
+  if (accounts && !legacyLink) {
+    const email = $('username').value.trim(), password = $('password').value;
+    if (!email || !password) { showLogin('Enter your email and password.'); return; }
+    // This click can unlock audio, so incoming voices play later.
+    ctx ||= new AudioContext({ latencyHint: 'interactive' });
+    ctx.resume().catch(() => {}); applySink();
+    $('signIn').disabled = $('signUp').disabled = true;
+    try {
+      const session = await accountSignIn(email, password, { create });
+      if (session.confirm) { showLogin('Check your email to confirm the account, then sign in.'); return; }
+      $('password').value = '';
+      if (params.get('next') === '/') { location.replace('/'); return; }
+      viaSession = true; enterApp(session.handle);
+    } catch (error) { showLogin(error.message); $('password').select(); }
+    finally { $('signIn').disabled = $('signUp').disabled = false; }
+    return;
+  }
   if (!token) { showLogin(INVALID_LINK); return; }
   const who = pick($('username').value), password = $('password').value;
   if (!who || ACCOUNTS[who] !== password) { showLogin('Wrong username or password.'); $('password').select(); return; }
@@ -448,6 +474,7 @@ function signIn(event) {
   enterApp(who);
 }
 function logout() {
+  if (viaSession) { viaSession = false; signOut(); }
   endCall(true);
   stopConnection(); signedIn = false; connected = false; peerOnline = false; peerInCall = false;
   cancelRecording(); releaseMic();
@@ -718,7 +745,8 @@ async function ack(id) {
 async function fetchClip(clip) {
   const url = new URL(clip.url, location.origin);
   if (url.origin !== location.origin) throw new Error('Clip is from another site.');
-  if (!url.searchParams.has('t')) url.searchParams.set('t', token);
+  if (viaSession) url.searchParams.set('access_token', getSession()?.access_token || '');
+  else if (!url.searchParams.has('t')) url.searchParams.set('t', token);
   let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -769,6 +797,35 @@ function stopPlayback() {
 
 /* ---------- Wiring ---------- */
 $('loginForm').addEventListener('submit', signIn);
+$('signUp').addEventListener('click', () => signIn(null, true));
+
+// Twinly key (accounts only): saved encrypted on the server, checked with Twinly first.
+function showTwinlyHint(hint) {
+  $('twinlyHint').textContent = hint ? `Saved key: ${hint}` : 'No key saved. Calls use the server’s key.';
+  $('twinlyRemove').hidden = !hint;
+}
+async function loadTwinly() {
+  if (!viaSession) return;
+  try { const response = await authFetch('/api/me'); if (response.ok) showTwinlyHint((await response.json()).twinly?.hint); } catch {}
+}
+async function saveTwinly(method, body) {
+  $('twinlySave').disabled = $('twinlyRemove').disabled = true;
+  $('twinlyNote').textContent = method === 'PUT' ? 'Checking the key with Twinly…' : 'Removing…';
+  try {
+    const response = await authFetch('/api/me/twinly', { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Server returned HTTP ${response.status}.`);
+    $('twinlyKey').value = ''; showTwinlyHint(data.twinly?.hint);
+    $('twinlyNote').textContent = method === 'PUT' ? 'Saved. Your voice now uses this key.' : 'Removed.';
+  } catch (error) { $('twinlyNote').textContent = error.message; }
+  finally { $('twinlySave').disabled = $('twinlyRemove').disabled = false; }
+}
+$('twinlySettings').addEventListener('submit', event => {
+  event.preventDefault();
+  const key = $('twinlyKey').value.trim();
+  if (key) saveTwinly('PUT', { key });
+});
+$('twinlyRemove').addEventListener('click', () => saveTwinly('DELETE'));
 $('logout').addEventListener('click', logout);
 joinBtn.addEventListener('click', joinCall);
 leaveBtn.addEventListener('click', () => { endCall(true); setStatus('Ready'); });
@@ -777,7 +834,7 @@ leaveBtn.addEventListener('click', () => { endCall(true); setStatus('Ready'); })
 const settingsBtn = $('settingsBtn'), settings = $('settings');
 function toggleSettings(open = settings.hidden) {
   settings.hidden = !open; settingsBtn.setAttribute('aria-expanded', String(open));
-  if (open) { listDevices(); $('micSelect').focus(); }
+  if (open) { listDevices(); loadTwinly(); $('micSelect').focus(); }
 }
 settingsBtn.addEventListener('click', () => toggleSettings());
 document.addEventListener('pointerdown', event => {
@@ -828,7 +885,15 @@ navigator.mediaDevices?.addEventListener?.('devicechange', listDevices);
 
 // Start: a legacy ?as= link (tools and tests) or a remembered session skips the sign-in.
 const preset = pick(params.get('as')) || pick(ssGet('vf-comms-user'));
-if (!token) { showLogin(INVALID_LINK); $('signIn').disabled = true; }
+if (accounts && !legacyLink) {
+  $('usernameLabel').textContent = 'Email'; $('username').type = 'email'; $('username').autocomplete = 'email';
+  document.querySelector('.login-card .hint').textContent = 'Sign in with your Sugarcoat account.';
+  $('signUp').hidden = false; $('twinlySettings').hidden = false;
+  if (await accessToken()) {
+    if (params.get('next') === '/') location.replace('/');
+    else { viaSession = true; enterApp(getSession().handle); }
+  } else { showLogin(); $('username').focus(); }
+} else if (!token) { showLogin(INVALID_LINK); $('signIn').disabled = true; }
 else if (preset) enterApp(preset);
 else { showLogin(); $('username').focus(); }
 listDevices();

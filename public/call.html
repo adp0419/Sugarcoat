@@ -22,12 +22,14 @@
       </div>
       <h1>Welcome back</h1>
       <p class="hint">Sign in to message and call your team.</p>
-      <label for="username">Username</label>
+      <label id="usernameLabel" for="username">Username</label>
       <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
       <p id="loginError" class="error" role="alert" hidden></p>
       <button id="signIn" class="talk" type="submit">Sign in</button>
+      <!-- Shown only when accounts are enabled on the server. -->
+      <button id="signUp" class="secondary" type="button" hidden>Create account</button>
     </form>
   </main>
 
@@ -98,6 +100,18 @@
           </label>
           <button id="listDevices" class="secondary" type="button">Allow microphone to show device names</button>
           <p id="deviceNote" class="hint" role="status"></p>
+          <!-- Shown only when accounts are enabled on the server. -->
+          <form id="twinlySettings" class="twinly-settings" hidden>
+            <h2 class="settings-title">Twinly voice</h2>
+            <p id="twinlyHint" class="hint">No key saved. Calls use the server’s key.</p>
+            <label class="device-name" for="twinlyKey">Twinly API key (needs the voice scope)</label>
+            <input id="twinlyKey" type="password" autocomplete="off" spellcheck="false" placeholder="twk_live_…">
+            <div class="twinly-actions">
+              <button id="twinlySave" class="secondary" type="submit">Save key</button>
+              <button id="twinlyRemove" class="secondary" type="button" hidden>Remove</button>
+            </div>
+            <p id="twinlyNote" class="hint" role="status"></p>
+          </form>
         </div>
       </div>
     </nav>

@@ -12,6 +12,28 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: APP_MODE
-        value: mock
+        value: live
       - key: TTS_PROVIDER
-        value: mock
+        value: twinly
+      # Change if Render gives the service a different URL.
+      - key: APP_ORIGIN
+        value: https://sugarcoat-lite.onrender.com
+      # Secrets: Render asks for these on the first Blueprint deploy (copy from your .env).
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: APP_ENCRYPTION_KEY
+        sync: false
+      - key: CALL_USERS
+        sync: false
+      # Optional fallback voice key; each person can save their own in the app instead.
+      - key: TWINLY_API_KEY
+        sync: false
+      # CALL_TOKEN is deliberately not set here: on the hosted app, sign-in replaces token links.

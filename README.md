@@ -135,11 +135,11 @@ Not verified together in this session: a real browser microphone → all live pr
 
 ## Deployment
 
-`render.yaml` defines one free Render Node service in mock mode. Push to your repository and create a Render Blueprint, then add secret keys and live configuration in its dashboard. Use `npm start`, `HOST=0.0.0.0`, the host-assigned `PORT`, and `APP_ORIGIN` equal to the exact HTTPS origin (no trailing slash). This is configuration, not an already-published deployment. HTTPS is required for microphones outside localhost.
+`render.yaml` defines one free Render Node service in live mode with accounts on. Push to your repository and create a Render Blueprint; Render asks for each `sync: false` secret (copy them from `.env`). It deliberately sets no `CALL_TOKEN`, so the hosted app is reachable only by signing in. Use `npm start`, `HOST=0.0.0.0`, the host-assigned `PORT`, and `APP_ORIGIN` equal to the exact HTTPS origin (no trailing slash). This is configuration, not an already-published deployment. HTTPS is required for microphones outside localhost.
 
 [Render free services](https://render.com/docs/free) can sleep after 15 idle minutes and take about a minute to wake. This overwhelms voice latency. Prefer a local process or an always-on instance when speed matters; no keep-warm pings are added. Twinly still needs the key owner's awake Mac, even when this server is hosted remotely.
 
-The server flushes responses and disables transform/proxy buffering hints; reverse proxies must pass incremental responses and allow the configured deadline. With Nginx use `proxy_buffering off`. Hosted behavior is untested. A public live endpoint lets visitors consume provider quota because authentication is intentionally absent; deploy with access and provider spending caps appropriate to your use.
+The server flushes responses and disables transform/proxy buffering hints; reverse proxies must pass incremental responses and allow the configured deadline. With Nginx use `proxy_buffering off`. Hosted behavior is untested. Without accounts configured, a public live endpoint lets visitors consume provider quota; deploy with accounts on (below) and provider spending caps appropriate to your use.
 
 ## Files
 
@@ -158,3 +158,14 @@ SugarcoatLite/
 ## Call (two laptops)
 
 An optional, separate feature: two people on two MacBooks talk through the cleanup pipeline and each hears the other's cleaned-up words in their own Twinly voice. The single-user page at `/` is unchanged. Setup, commands, error meanings and a pre-demo checklist are in [docs/CALL.md](docs/CALL.md).
+
+## Accounts (optional, Supabase)
+
+Off unless `SUPABASE_URL` is set; without it everything above works as before. With it:
+
+- `/` and `/call` require signing in (email + password). The server proxies Supabase Auth, so the browser never talks to Supabase and the CSP is unchanged. Only emails listed in `CALL_USERS` (`aryan:you@x.com,rohit:them@y.com`) can sign in or create an account.
+- In `/call` → Settings, each person pastes their Twinly key. The server checks it with Twinly's free `GET /v1/me` (it must have the `voice` scope), encrypts it with `APP_ENCRYPTION_KEY` (AES-256-GCM) and stores it in `public.profiles`. A saved key wins over the `.env` keys; with none saved, the `.env` keys are used.
+- Legacy `?as=…&t=…` token links (`call-sim`, `call-e2e.py`) keep working whenever `CALL_TOKEN` is set.
+
+Setup: create a Supabase project, run [supabase/schema.sql](supabase/schema.sql) in its SQL editor, then fill the Supabase section of `.env` (see `.env.example`). Twinly offers no OAuth, so pasting a key is the only way to connect it.
+

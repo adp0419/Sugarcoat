@@ -358,3 +358,11 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
 .call-more[aria-expanded="true"] svg { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .call-more svg { transition: none; } }
 @media (max-width: 759px) { .call-group { margin-left: 44px; } }
+
+/* Twinly key (accounts mode only) */
+.twinly-settings { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
+.twinly-settings[hidden] { display: none; }
+.twinly-settings input { min-height: 36px; padding: 6px 10px; border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font: inherit; font-size: 13px; }
+.twinly-actions { display: flex; gap: 8px; }
+.twinly-actions .secondary { flex: 1; }
+.login-card #signUp { margin-top: 0; }

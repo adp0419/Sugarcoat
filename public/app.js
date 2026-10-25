@@ -1,4 +1,5 @@
 import { StreamPlayer } from './playback.js';
+import { authFetch, accessToken } from './auth.js';
 
 const $ = id => document.getElementById(id);
 const talk = $('talk'), cancel = $('cancel'), play = $('play');
@@ -236,9 +237,10 @@ async function processRecording(run, mimeType) {
     if (isCurrent(run)) { cancelRun(); showError(new Error('Request timed out. Try a shorter utterance.')); }
   }, config.timeoutMs + 10000);
   try {
-    const response = await fetch('/api/process', { method: 'POST', headers: { 'Content-Type': mimeType },
+    const response = await authFetch('/api/process', { method: 'POST', headers: { 'Content-Type': mimeType },
       body: blob, signal: run.controller.signal });
     if (!response.ok) {
+      if (config.auth && response.status === 401) { location.assign('/call?next=/'); return; }
       const error = await response.json();
       if (error.timings) { run.server = error.timings; renderTimings(run); }
       throw new Error(error.error || `Server returned HTTP ${response.status}.`);
@@ -302,6 +304,8 @@ try {
   const response = await fetch('/api/config');
   if (!response.ok) throw new Error('Could not connect to the server. Reload to try again.');
   config = await response.json();
+  // With accounts enabled, sign in on the Comms page first; it sends you back here.
+  if (config.auth && !await accessToken()) { location.replace('/call?next=/'); await new Promise(() => {}); }
   $('mode').textContent = config.mode === 'mock' ? 'MOCK MODE · example transcript + test tone. Your recording is not transcribed.'
     : config.tts === 'mock' ? 'LIVE TRANSCRIPTION + CLEANUP · test-tone output. No cloned speech.' : 'LIVE MODE · Groq → Google → Twinly';
   $('mode').dataset.state = config.mode === 'mock' || config.tts === 'mock' ? 'warning' : '';
