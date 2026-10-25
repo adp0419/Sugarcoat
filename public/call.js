@@ -411,6 +411,7 @@ const postJson = (path, body) => fetch(withToken(path), { method: 'POST', header
 
 function invalidLink() {
   if (viaSession) { logout(); showLogin('Your session ended. Sign in again.'); return; }
+  if (accounts) { stopConnection(); location.replace('/call'); return; } // stale token link: sign in instead
   stopConnection(); connected = false;
   setConnection('Link not valid', 'error');
   setLinkError(INVALID_LINK);
