@@ -240,7 +240,7 @@ async function processRecording(run, mimeType) {
     const response = await authFetch('/api/process', { method: 'POST', headers: { 'Content-Type': mimeType },
       body: blob, signal: run.controller.signal });
     if (!response.ok) {
-      if (config.auth && response.status === 401) { location.assign('/call?next=/'); return; }
+      if (config.auth && response.status === 401) { location.assign(`/call?next=${location.pathname}`); return; }
       const error = await response.json();
       if (error.timings) { run.server = error.timings; renderTimings(run); }
       throw new Error(error.error || `Server returned HTTP ${response.status}.`);
@@ -305,7 +305,7 @@ try {
   if (!response.ok) throw new Error('Could not connect to the server. Reload to try again.');
   config = await response.json();
   // With accounts enabled, sign in on the Comms page first; it sends you back here.
-  if (config.auth && !await accessToken()) { location.replace('/call?next=/'); await new Promise(() => {}); }
+  if (config.auth && !await accessToken()) { location.replace(`/call?next=${location.pathname}`); await new Promise(() => {}); }
   $('mode').textContent = config.mode === 'mock' ? 'MOCK MODE · example transcript + test tone. Your recording is not transcribed.'
     : config.tts === 'mock' ? 'LIVE TRANSCRIPTION + CLEANUP · test-tone output. No cloned speech.' : 'LIVE MODE · Groq → Google → Twinly';
   $('mode').dataset.state = config.mode === 'mock' || config.tts === 'mock' ? 'warning' : '';

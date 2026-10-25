@@ -77,6 +77,7 @@ test('accounts off: auth routes are 404 and /api/config says auth false', async 
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const base = `http://127.0.0.1:${server.address().port}`;
   assert.equal((await (await fetch(`${base}/api/config`)).json()).auth, false);
+  assert.equal((await fetch(`${base}/`, { redirect: 'manual' })).status, 200); // home page unchanged
   const response = await fetch(`${base}/api/auth/signin`, { method: 'POST', body: '{}' });
   assert.equal(response.status, 404);
   assert.equal((await response.json()).code, 'AUTH_DISABLED');
@@ -157,6 +158,14 @@ test('call relay: a session names the caller (as= cannot spoof) and works withou
   assert.equal((await poll.json()).you, 'aryan');
   assert.equal((await fetch(`${base}/api/call/poll?as=aryan`)).status, 503); // no session, no token configured
   assert.equal((await fetch(`${base}/api/call/poll?as=aryan&access_token=tok:eve@example.com`)).status, 403);
+});
+
+test('home page: accounts on sends / to the comms page and keeps the recorder at /lite', async t => {
+  const { base } = await fixture(t);
+  const home = await fetch(`${base}/`, { redirect: 'manual' });
+  assert.equal(home.status, 302);
+  assert.equal(home.headers.get('location'), '/call');
+  assert.equal((await fetch(`${base}/lite`)).status, 200);
 });
 
 test('call relay: legacy token links still work with accounts on', async t => {

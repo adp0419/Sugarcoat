@@ -458,7 +458,7 @@ async function signIn(event, create = false) {
       const session = await accountSignIn(email, password, { create });
       if (session.confirm) { showLogin('Check your email to confirm the account, then sign in.'); return; }
       $('password').value = '';
-      if (params.get('next') === '/') { location.replace('/'); return; }
+      if (params.get('next') === '/lite') { location.replace('/lite'); return; }
       viaSession = true; enterApp(session.handle);
     } catch (error) { showLogin(error.message); $('password').select(); }
     finally { $('signIn').disabled = $('signUp').disabled = false; }
@@ -890,7 +890,7 @@ if (accounts && !legacyLink) {
   document.querySelector('.login-card .hint').textContent = 'Sign in with your Sugarcoat account.';
   $('signUp').hidden = false; $('twinlySettings').hidden = false;
   if (await accessToken()) {
-    if (params.get('next') === '/') location.replace('/');
+    if (params.get('next') === '/lite') location.replace('/lite');
     else { viaSession = true; enterApp(getSession().handle); }
   } else { showLogin(); $('username').focus(); }
 } else if (!token) { showLogin(INVALID_LINK); $('signIn').disabled = true; }

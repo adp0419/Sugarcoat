@@ -13,6 +13,7 @@ import { createAuth } from './lib/auth.mjs';
 
 const files = new Map([
   ['/', ['public/index.html', 'text/html; charset=utf-8']],
+  ['/lite', ['public/index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['public/app.js', 'text/javascript; charset=utf-8']],
   ['/playback.js', ['public/playback.js', 'text/javascript; charset=utf-8']],
   ['/auth.js', ['public/auth.js', 'text/javascript; charset=utf-8']],
@@ -70,6 +71,8 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
       return;
     }
     if (req.method === 'GET' && path === '/healthz') { json(200, { ok: true }); return; }
+    // With accounts on, the comms page is the home page; the single-user recorder lives at /lite.
+    if (req.method === 'GET' && path === '/' && auth.enabled) { res.writeHead(302, { Location: '/call' }); res.end(); return; }
     if (req.method === 'GET' && files.has(path)) {
       try {
         const [name, type] = files.get(path);
