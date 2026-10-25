@@ -6,8 +6,8 @@ import { getSession, signIn as accountSignIn, signOut, accessToken, authFetch } 
 const $ = id => document.getElementById(id);
 const talk = $('talk'), record = $('record'), joinBtn = $('join'), leaveBtn = $('leave'), enableBtn = $('enable');
 const NAMES = { aryan: 'Aryan', rohit: 'Rohit' };
-// Test contacts in the sidebar. The server answers for them and they are always online:
-// a voice message gets a reply, and in a call they play your own cloned voice back to you.
+// Test contacts in the sidebar: a sandbox that is always online and never replies.
+// In a call, your own line comes back in your cloned voice, so you can check Twinly.
 const CONTACTS = { maya: 'Maya Chen', jordan: 'Jordan Alvarez', priya: 'Priya Nair', dev: 'Dev Team', sam: 'Sam Okafor', leah: 'Leah Brooks' };
 const TONES = { maya: 1, jordan: 2, priya: 3, dev: 4, sam: 5, leah: 6 };
 const isContact = who => Object.hasOwn(CONTACTS, who);
@@ -40,6 +40,7 @@ let rec = null, sending = false, pumping = false, currentSource, currentAudio, g
 const turns = new Map();   // utterance id -> { id, entry, clips, ... }
 const queue = [];          // peer call utterances in arrival order
 const sentPending = [];    // my call utterances waiting for "delivered"
+const ownEntries = new Map(); // my utterance id -> its entry (test contacts play it back to me)
 
 const peerOf = who => (who === 'aryan' ? 'rohit' : 'aryan');
 const peerName = () => nameOf(chat || peerOf(me));
@@ -113,6 +114,7 @@ function refresh() {
   else if (rec?.kind === 'call') { label = 'Release to send'; reason = 'Release to send.'; }
   else if (!chatInCall()) { disabled = true; reason = `Waiting for ${peer} to join the call.`; }
   else if (rec || sending) { disabled = true; label = sending ? 'Sending…' : 'Hold to talk'; reason = 'Finish your other message first.'; }
+  else if (playing && isContact(chat)) { disabled = true; label = 'Playing your voice'; reason = 'Wait for your cloned voice to finish.'; }
   else if (playing) { disabled = true; label = `${peer} is speaking`; reason = `Waiting for ${peer} to finish. One voice at a time.`; }
   talk.disabled = disabled;
   $('talkLabel').textContent = label;
@@ -536,7 +538,7 @@ function openChat(id) {
   $('dmTitle').textContent = name; $('tilePeerName').textContent = name;
   $('emptyTitle').textContent = `This is the start of your conversation with ${name}.`;
   $('emptyHint').textContent = isContact(id)
-    ? `${name} is a test contact. Send a voice message and ${name} replies with what arrived. Join the call and ${name} plays your words back in your cloned voice.`
+    ? `${name} is a test contact for checking your setup; nothing you send reaches anyone. Voice messages show Sugarcoat’s cleanup. In a call, each line plays back in your cloned voice, so you can confirm Twinly works.`
     : PEER_HINT;
   setAvatar($('emptyAvatar'), id); setAvatar($('tilePeerAvatar'), id);
   countEntries(); refresh();
@@ -662,7 +664,7 @@ async function sendRecording(run, mimeType) {
       } else if (event.type === 'preview') { if (entry && event.text && !entry.raw) setText(entry, String(event.text), true); }
       else if (event.type === 'cleaned') {
         cleanedText = String(event.text || '').trim();
-        if (cleanedText) { entry.id = event.id ?? null; showEdits(entry, String(event.raw || entry.raw || ''), cleanedText); }
+        if (cleanedText) { entry.id = event.id ?? null; ownEntries.set(entry.id, entry); showEdits(entry, String(event.raw || entry.raw || ''), cleanedText); }
         else { removeEntry(entry); entry = null; }
       } else if (event.type === 'error') throw Object.assign(new Error(event.error || ''), { code: event.code });
       else if (event.type === 'done') finished = true;
@@ -680,6 +682,7 @@ async function sendRecording(run, mimeType) {
     if (pending.trim()) handle(pending.trim());
     if (!finished) throw Object.assign(new Error('dropped'), { dropped: true });
     if (!entry) { if (isCall) setStatus('No speech heard. Hold the button and try again.'); else showError('No speech heard. Hold the button and try again.'); }
+    else if (isCall && isContact(to)) { if (!entry.playedBack) setMark(entry, 'Your voice is ready', 'waiting'); setStatus('Sent', 'ready'); }
     else if (isCall) { setMark(entry, `Sent. Waiting for ${nameOf(to)}`, 'waiting'); sentPending.push(entry); setStatus('Sent', 'ready'); }
     else setMark(entry, `Delivered to ${nameOf(to)}`, 'heard');
   } catch (error) {
@@ -722,6 +725,8 @@ function onClip(data) {
   const from = senderOf(data);
   if (data.id == null || !from) return;
   const turn = turnFor(data.id, from);
+  // A test contact's clip is your own line in your cloned voice: play it on your message.
+  if (!turn.entry && isContact(from)) { turn.entry = ownEntries.get(data.id); turn.own = true; if (!turn.entry) { turn.done = true; return; } }
   if (!turn.entry) turn.entry = addEntry('peer', 'Voice message', 'Waiting', 'waiting', 'call', from);
   if (turn.clips.has(data.seq) || turn.done) return;
   turn.clips.set(data.seq, data);
@@ -787,7 +792,7 @@ async function playTurn(turn) {
     if (!inCall) return;
     if (!clip) { ok = false; break; }
     try {
-      await playClip(clip, () => setMark(turn.entry, 'Speaking', 'speaking'));
+      await playClip(clip, () => setMark(turn.entry, turn.own ? 'Playing your cloned voice' : 'Speaking', 'speaking'));
     } catch (error) {
       if (!inCall) return;
       ok = false; break;
@@ -797,9 +802,11 @@ async function playTurn(turn) {
   if (!inCall || turn.done) return;
   if (!ok) {
     finishTurn(turn, 'Couldn’t play', 'failed');
-    showError(`${peerName()} said something, but it couldn’t be played. Ask them to say it again.`);
+    showError(turn.own ? 'Your cloned voice was made but couldn’t be played. Check your speaker, then try again.'
+      : `${peerName()} said something, but it couldn’t be played. Ask them to say it again.`);
     return;
   }
+  if (turn.own) { turn.entry.playedBack = true; finishTurn(turn, 'Played in your cloned voice', 'heard'); return; }
   finishTurn(turn, 'Heard', 'heard');
   ack(turn.id);
 }

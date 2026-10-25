@@ -98,24 +98,21 @@ test('speech flows sender to peer in both directions, with no audio for the send
   }
 });
 
-test('test contacts: replies and your own cloned voice come back to you, with Rohit offline', async t => {
+test('test contacts never reply; a call line\'s cloned voice comes back to the speaker, with Rohit offline', async t => {
   const f = await fixture(t, {}, { synthesize: async ({ text }) => mp3(text) });
   const aryan = await connect(t, f, 'aryan');
   const post = (path, to) => fetch(`${f.url(path, 'aryan')}&to=${to}`, { method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: Buffer.from('audio') });
 
   const message = await post('/api/call/message', 'maya');
   assert.equal(message.status, 200);
-  const messageId = (await ndjson(message)).find(l => l.type === 'cleaned').id;
-  const reply = await aryan.waitFor(e => e.event === 'message' && e.data.id === messageId);
-  assert.equal(reply.data.from, 'maya');
-  assert.equal(reply.data.text, `Got it: “${MOCK_CLEANED}”`);
+  assert.equal((await ndjson(message)).find(l => l.type === 'cleaned').text, MOCK_CLEANED);
 
   const spoken = await post('/api/call/speak', 'dev');
   assert.equal(spoken.status, 200);
   const id = (await ndjson(spoken)).find(l => l.type === 'cleaned').id;
-  const caption = await aryan.waitFor(e => e.event === 'caption' && e.data.id === id);
-  assert.deepEqual(caption.data, { id, from: 'dev', text: MOCK_CLEANED });
   const clip = await aryan.waitFor(e => e.event === 'clip' && e.data.id === id);
+  assert.equal(clip.data.from, 'dev');
+  assert.ok(!aryan.events.some(e => e.event === 'message' || e.event === 'caption'), 'test contacts never reply');
   assert.equal(await (await fetch(`${f.base}${clip.data.url}?t=${TOKEN}`)).text(), `voice:${MOCK_CLEANED}`);
   const ack = await fetch(f.url('/api/call/ack', 'aryan'), { method: 'POST', body: JSON.stringify({ id }) });
   assert.equal(ack.status, 200, 'the speaker may acknowledge a test contact\'s playback');
