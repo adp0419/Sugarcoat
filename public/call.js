@@ -3,7 +3,7 @@
 // Talks to /api/call/* only. Playback is a small copy of the decode-and-schedule
 // idea in playback.js (which stays untouched); each clip is fetched by URL.
 const $ = id => document.getElementById(id);
-const talk = $('talk'), record = $('record'), cancel = $('cancel'), joinBtn = $('join'), leaveBtn = $('leave'), enableBtn = $('enable');
+const talk = $('talk'), record = $('record'), joinBtn = $('join'), leaveBtn = $('leave'), enableBtn = $('enable');
 const NAMES = { aryan: 'Aryan', rohit: 'Rohit' };
 // Demo accounts, checked in the page only. The link's token still guards the server.
 const ACCOUNTS = { aryan: '1234', rohit: '4321' };
@@ -34,7 +34,15 @@ const peerName = () => NAMES[peerOf(me)] || 'the other person';
 const initial = who => (NAMES[who] || '?')[0];
 
 /* ---------- Status and errors ---------- */
-function setStatus(text, state = 'ready') { $('statusText').textContent = text; $('status').dataset.state = state; }
+// The call status shows under the other person's name in their call card.
+let statusRaw = 'Ready';
+function setStatus(text, state = 'ready') {
+  statusRaw = text;
+  const peer = peerName();
+  $('statusText').textContent = text === 'Ready' ? 'In call' : text === `${peer} is speaking` ? 'Speaking'
+    : text === `Waiting for ${peer}` ? 'Not joined yet' : text;
+  $('status').dataset.state = state;
+}
 function showError(text) { $('error').textContent = text; $('error').hidden = false; }
 function hideError() { $('error').hidden = true; $('error').textContent = ''; }
 function setLinkError(text) { $('linkError').textContent = text || ''; $('linkError').hidden = !text; }
@@ -79,29 +87,27 @@ function refresh() {
   $('presence').dataset.state = state;
   $('presenceText').textContent = state === 'call' ? (inCall ? `${peer} is in the call with you` : `${peer} is in the call. Join them.`) : words;
   $('tilePeer').dataset.state = playing && inCall ? 'speaking' : peerInCall ? 'in' : 'out';
-  $('tilePeerState').textContent = playing && inCall ? 'Speaking' : peerInCall ? 'In call' : 'Not joined';
   $('tileMe').dataset.state = rec?.kind === 'call' ? 'speaking' : 'in';
 
   // Call controls.
   joinBtn.hidden = inCall; leaveBtn.hidden = !inCall; $('callPanel').hidden = !inCall;
   joinBtn.disabled = !connected;
-  let label = 'Hold to Talk', reason = '', keys = true, disabled = false;
-  if (!connected) { disabled = true; reason = 'Reconnecting. You can talk again once the call is back.'; keys = false; }
-  else if (rec?.kind === 'call') { label = 'Release to send'; reason = 'Release to send, or press Esc to cancel.'; keys = false; }
-  else if (!peerInCall) { disabled = true; reason = `Waiting for ${peer} to join the call.`; keys = false; }
-  else if (rec || sending) { disabled = true; label = sending ? 'Sending…' : 'Hold to Talk'; reason = 'Finish your other message first.'; keys = false; }
-  else if (playing) { disabled = true; label = `${peer} is speaking`; reason = `Waiting for ${peer} to finish. One voice at a time.`; keys = false; }
+  let label = 'Hold to talk', reason = '', disabled = false;
+  if (!connected) { disabled = true; reason = 'Reconnecting. You can talk again once the call is back.'; }
+  else if (rec?.kind === 'call') { label = 'Release to send'; reason = 'Release to send.'; }
+  else if (!peerInCall) { disabled = true; reason = `Waiting for ${peer} to join the call.`; }
+  else if (rec || sending) { disabled = true; label = sending ? 'Sending…' : 'Hold to talk'; reason = 'Finish your other message first.'; }
+  else if (playing) { disabled = true; label = `${peer} is speaking`; reason = `Waiting for ${peer} to finish. One voice at a time.`; }
   talk.disabled = disabled;
   $('talkLabel').textContent = label;
   talk.dataset.held = rec?.kind === 'call' ? 'true' : 'false';
   talk.setAttribute('aria-label', rec?.kind === 'call' ? 'Recording. Release to send.' : disabled ? `${label}. ${reason}` : 'Hold to talk. Release to send.');
-  $('hintText').textContent = reason; $('hintText').hidden = !reason; $('hintKeys').hidden = !keys;
-  cancel.disabled = !rec;
+  $('hintText').textContent = reason; $('hintText').hidden = !reason;
   if (inCall && !rec && !sending) {
     if (!connected) setStatus('Reconnecting', 'processing');
     else if (playing) setStatus(`${peer} is speaking`, 'speaking');
     else if (!peerInCall) setStatus(`Waiting for ${peer}`, 'processing');
-    else if (['Reconnecting', `${peer} is speaking`, `Waiting for ${peer}`].includes($('statusText').textContent)) setStatus('Ready');
+    else if (['Reconnecting', `${peer} is speaking`, `Waiting for ${peer}`].includes(statusRaw)) setStatus('Ready');
   }
 
   // Voice message composer.
@@ -109,9 +115,8 @@ function refresh() {
   record.disabled = !connected || (!!rec && !held) || sending || !peerOnline;
   record.dataset.held = held ? 'true' : 'false';
   $('recordLabel').textContent = held ? 'Release to send' : sending && !rec ? 'Polishing…' : 'Hold to record a voice message';
-  $('composerHint').textContent = !connected ? '' : !peerOnline ? `${peer} is offline. Voice messages send once they sign in.`
-    : held ? 'Release to send, or press Esc to cancel.'
-    : `Becomes polished text for ${peer}.${inCall ? '' : ' Or hold Space.'}`;
+  // Only the circle shows, unless there's a reason it can't be used.
+  $('composerHint').textContent = connected && !peerOnline ? `${peer} is offline. Voice messages send once they sign in.` : '';
 }
 
 /* ---------- Thread ---------- */
@@ -135,24 +140,171 @@ function addEntry(who, text, mark, markState, kind = 'message') {
   meta.append(label, time, tag);
   const said = document.createElement('p'); said.className = 'said'; said.textContent = text;
   const markEl = document.createElement('span'); markEl.className = 'flag';
-  li.append(avatar, meta, said, markEl); log.append(li);
+  li.append(avatar, meta, said, markEl);
+  (kind === 'call' && callGroup ? callGroup.list : log).append(li);
   const entry = { li, said, markEl };
+  if (kind === 'call' && callGroup) callGroup.entries.push(entry);
   setMark(entry, mark, markState);
   countEntries();
-  if (follow) log.scrollTop = log.scrollHeight;
+  if (follow || kind === 'call') followEntry(entry);
   return entry;
 }
 function setText(entry, text, pending = false) {
   if (!entry) return;
   const follow = nearBottom();
+  entry.typeToken = null;
   entry.said.textContent = text; entry.said.dataset.pending = pending ? 'true' : 'false';
-  if (follow) log.scrollTop = log.scrollHeight;
+  if (follow) followEntry(entry);
 }
 function setMark(entry, text, state = '') {
   if (!entry) return;
   entry.markEl.textContent = text; entry.markEl.dataset.state = state;
 }
 function removeEntry(entry) { entry?.li.remove(); countEntries(); }
+function followEntry(entry) { const box = entry.li.closest('.live-wrap') || log; box.scrollTop = box.scrollHeight; }
+
+/* ---------- Edits view: raw words typed in live, then Sugarcoat's changes marked ---------- */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const norm = word => word.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+// Word-level diff of what was said against the cleaned text: [{ op: 'same' | 'del' | 'ins', word }].
+// Aligned from the end, so a self-correction keeps the final wording and strikes the earlier try.
+function diffWords(before, after) {
+  const a = before.split(/\s+/).filter(Boolean).reverse(), b = after.split(/\s+/).filter(Boolean).reverse();
+  const same = (x, y) => { const k = norm(x); return !!k && k === norm(y); };
+  const n = a.length, m = b.length;
+  if (n * m > 250000) return [...a.map(word => ({ op: 'del', word })), ...b.map(word => ({ op: 'ins', word }))];
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+    dp[i][j] = same(a[i], b[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  }
+  const out = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (same(a[i], b[j])) { out.push({ op: 'same', word: b[j] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) out.push({ op: 'del', word: a[i++] });
+    else out.push({ op: 'ins', word: b[j++] });
+  }
+  while (i < n) out.push({ op: 'del', word: a[i++] });
+  while (j < m) out.push({ op: 'ins', word: b[j++] });
+  // Back in reading order; within a changed run, removed words come before added ones.
+  out.reverse();
+  for (let k = 1; k < out.length; k++) {
+    if (out[k].op === 'del' && out[k - 1].op === 'ins') { [out[k - 1], out[k]] = [out[k], out[k - 1]]; if (k > 1) k -= 2; }
+  }
+  return out;
+}
+// Type the raw transcript in word by word, as if it were being written live.
+function typeRaw(entry, raw) {
+  if (!entry || !raw) return Promise.resolve();
+  entry.raw = raw;
+  const token = entry.typeToken = {};
+  const words = raw.split(/\s+/).filter(Boolean);
+  entry.said.classList.remove('animate'); entry.said.dataset.pending = 'true';
+  if (reduceMotion) { entry.said.textContent = raw; return (entry.typing = Promise.resolve()); }
+  const step = Math.max(25, Math.min(90, 1800 / words.length));
+  const cursor = document.createElement('span'); cursor.className = 'typing';
+  entry.said.replaceChildren(cursor);
+  return (entry.typing = (async () => {
+    for (let k = 0; k < words.length; k++) {
+      if (entry.typeToken !== token) return;
+      cursor.before((k ? ' ' : '') + words[k]);
+      followEntry(entry);
+      await sleep(step);
+    }
+    cursor.remove();
+  })());
+}
+// Swap the typed transcript for the cleaned text: removed words struck in red, added words in green,
+// then settle into the clean text alone. Only the speaker sees this; the other person gets clean text.
+const EDIT_HOLD_MS = 1600;
+async function showEdits(entry, raw, cleaned) {
+  if (!entry) return;
+  entry.cleaned = cleaned;
+  await entry.typing;
+  entry.typeToken = null;
+  const parts = raw && !entry.final ? diffWords(raw, cleaned) : [];
+  if (!parts.some(part => part.op !== 'same')) { setText(entry, cleaned); return; }
+  const said = entry.said;
+  said.replaceChildren(); said.dataset.pending = 'false'; said.classList.remove('animate');
+  let k = 0;
+  parts.forEach((part, index) => {
+    if (index) said.append(' ');
+    if (part.op === 'same') { said.append(part.word); return; }
+    const el = document.createElement(part.op); el.textContent = part.word; el.style.setProperty('--i', k++);
+    said.append(el);
+  });
+  if (!reduceMotion) { void said.offsetWidth; said.classList.add('animate'); }
+  followEntry(entry);
+  const token = entry.typeToken = {};
+  await sleep((reduceMotion ? 0 : k * 70 + 650) + EDIT_HOLD_MS);
+  if (entry.typeToken !== token) return;
+  said.classList.add('settle');
+  await sleep(reduceMotion ? 0 : 450);
+  if (entry.typeToken !== token) return;
+  setText(entry, cleaned);
+}
+
+/* ---------- The call's record in the DM: "Call started" ... "Call ended" ---------- */
+let callGroup = null;
+const PHONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>';
+const CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+const stamp = date => date.toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+function callMark(text, end = false) {
+  const mark = document.createElement('p'); mark.className = end ? 'call-mark end' : 'call-mark';
+  mark.innerHTML = PHONE; mark.append(text);
+  return mark;
+}
+function startCallGroup() {
+  if (callGroup) return;
+  const li = document.createElement('li'); li.className = 'call-group';
+  const note = document.createElement('p'); note.className = 'note'; note.textContent = 'Call in progress. Follow along in the live transcript above.';
+  li.append(callMark(`Call started · ${stamp(new Date())}`), note); log.append(li);
+  const list = document.createElement('ol'); list.className = 'call-list';
+  $('liveWrap').replaceChildren(list);
+  callGroup = { li, list, note, entries: [], startedAt: Date.now() };
+  countEntries(); log.scrollTop = log.scrollHeight;
+}
+function endCallGroup() {
+  const group = callGroup; if (!group) return;
+  callGroup = null;
+  const count = group.list.children.length;
+  const minutes = Math.max(1, Math.round((Date.now() - group.startedAt) / 60000));
+  group.note.textContent = 'No one spoke.'; group.note.hidden = count > 0;
+  // The record keeps only the clean words, no edit marks.
+  for (const entry of group.entries) { entry.final = true; if (entry.cleaned) setText(entry, entry.cleaned); }
+  group.li.append(group.list);
+  if (count > 1) {
+    // Show the first message; the rest open on demand.
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'call-more';
+    const text = document.createElement('span');
+    more.append(text); more.insertAdjacentHTML('beforeend', CHEVRON);
+    const label = open => { text.textContent = open ? 'Show less' : `Show ${count - 1} more message${count === 2 ? '' : 's'}`; more.setAttribute('aria-expanded', String(open)); };
+    more.addEventListener('click', () => label(!group.li.classList.toggle('collapsed')));
+    group.li.classList.add('collapsed'); label(false);
+    group.li.append(more);
+  }
+  group.li.append(callMark(`Call ended · ${stamp(new Date())} · ${minutes} min · ${count} message${count === 1 ? '' : 's'}`, true));
+  $('liveWrap').replaceChildren();
+  log.scrollTop = log.scrollHeight;
+}
+
+/* ---------- Level meters (mic while you hold, the other voice while it plays) ---------- */
+function startMeter(sourceNode, targets) {
+  const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+  sourceNode.connect(analyser);
+  const data = new Float32Array(analyser.fftSize);
+  let frame = 0, alive = true;
+  const set = value => { for (const el of targets) el?.style.setProperty('--level', value); };
+  const tick = () => {
+    if (!alive) return;
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0; for (const v of data) sum += v * v;
+    set(Math.min(1, Math.sqrt(sum / data.length) * 6).toFixed(3));
+    frame = requestAnimationFrame(tick);
+  };
+  tick();
+  return { stop() { alive = false; cancelAnimationFrame(frame); try { sourceNode.disconnect(analyser); } catch {} set('0'); } };
+}
 
 /* ---------- Audio context, devices ---------- */
 function applySink() {
@@ -265,14 +417,14 @@ async function openStream() {
 function showLogin(message = '') {
   $('app').hidden = true; $('login').hidden = false;
   $('loginError').textContent = message; $('loginError').hidden = !message;
-  document.title = 'Sign in · Sugarcoat Comms';
+  document.title = 'Sign in · Sugarcoat';
 }
 function enterApp(who) {
   me = who; signedIn = true; everOpened = false; errorsInRow = 0; connected = false;
   ssSet('vf-comms-user', me);
   const peer = peerOf(me);
   $('login').hidden = true; $('app').hidden = false;
-  document.title = `@${NAMES[peer]} · Sugarcoat Comms`;
+  document.title = `${NAMES[peer]} · Sugarcoat`;
   $('meName').textContent = NAMES[me]; setAvatar($('meAvatar'), me);
   $('peerNameRail').textContent = NAMES[peer]; setAvatar($('peerAvatar'), peer);
   $('dmTitle').textContent = NAMES[peer]; $('emptyTitle').textContent = `This is the start of your conversation with ${NAMES[peer]}.`;
@@ -318,6 +470,7 @@ async function joinCall() {
     if (!response.ok) throw new Error();
     const body = await response.json();
     inCall = true; peerInCall = !!body.peerInVoice;
+    startCallGroup();
     setStatus(peerInCall ? 'Ready' : `Waiting for ${peerName()}`, peerInCall ? 'ready' : 'processing');
     ensureMic().catch(error => showError(error.name === 'NotSupported' ? error.message : `${micError(error)} You can still hear ${peerName()}.`));
   } catch { showError('Couldn’t join the call. Try again.'); }
@@ -329,6 +482,7 @@ function endCall(tellServer) {
   for (const turn of queue) if (!turn.done) { turn.done = true; setMark(turn.entry, 'Left before it played', 'failed'); }
   queue.length = 0;
   const wasIn = inCall; inCall = false;
+  endCallGroup();
   if (wasIn && tellServer) postJson('/api/call/voice', { in: false }).catch(() => {});
   refresh();
 }
@@ -350,8 +504,12 @@ function beginTalk(kind) {
     const recorder = run.recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 });
     recorder.ondataavailable = event => { if (event.data.size) run.chunks.push(event.data); };
     recorder.onerror = () => { if (rec === run) { discard(run, ''); showError('Recording failed. Try again.'); } };
-    recorder.onstop = () => { clearTimeout(run.maxTimer); if (!run.cancelled && !run.discarded) sendRecording(run, mimeType); };
+    recorder.onstop = () => { clearTimeout(run.maxTimer); run.meter?.stop(); if (!run.cancelled && !run.discarded) sendRecording(run, mimeType); };
     recorder.start();
+    try {
+      ctx ||= new AudioContext({ latencyHint: 'interactive' });
+      run.meter = startMeter(ctx.createMediaStreamSource(stream), kind === 'call' ? [talk, $('meterMe')] : [record]);
+    } catch { /* the meter is decoration */ }
     run.maxTimer = setTimeout(() => endTalk(), MAX_RECORD_MS);
   }).catch(error => {
     if (rec !== run) return;
@@ -406,10 +564,11 @@ async function sendRecording(run, mimeType) {
         if (isCall) setStatus(`Cleaning · ${event.stage}`, 'processing');
         const mark = { transcribing: 'Transcribing', cleaning: 'Polishing', speaking: 'Making your voice', sent: 'Sending' }[event.stage];
         if (entry && mark) setMark(entry, mark, 'waiting');
-      } else if (event.type === 'preview') { if (entry && event.text) setText(entry, String(event.text), true); }
+        if (entry && event.transcript) typeRaw(entry, String(event.transcript));
+      } else if (event.type === 'preview') { if (entry && event.text && !entry.raw) setText(entry, String(event.text), true); }
       else if (event.type === 'cleaned') {
         cleanedText = String(event.text || '').trim();
-        if (cleanedText) { setText(entry, cleanedText); entry.id = event.id ?? null; }
+        if (cleanedText) { entry.id = event.id ?? null; showEdits(entry, String(event.raw || entry.raw || ''), cleanedText); }
         else { removeEntry(entry); entry = null; }
       } else if (event.type === 'error') throw Object.assign(new Error(event.error || ''), { code: event.code });
       else if (event.type === 'done') finished = true;
@@ -459,6 +618,7 @@ function onCaption(data) {
   if (data.id == null || pick(data.from) === me || turns.has(data.id)) return;
   const turn = turnFor(data.id);
   turn.entry = addEntry('peer', String(data.text || ''), inCall ? 'Waiting' : 'Said in the call', inCall ? 'waiting' : '', 'call');
+  turn.entry.cleaned = String(data.text || '');
   refresh(); pump();
 }
 function onClip(data) {
@@ -583,7 +743,8 @@ async function playClip(clip, onStart) {
     await new Promise(resolve => {
       const node = ctx.createBufferSource(); node.buffer = buffer; node.connect(ctx.destination);
       currentSource = node;
-      const finish = () => { clearTimeout(guard); node.disconnect(); if (currentSource === node) currentSource = null; resolve(); };
+      let level; try { level = startMeter(node, [$('meterPeer')]); } catch {}
+      const finish = () => { clearTimeout(guard); level?.stop(); node.disconnect(); if (currentSource === node) currentSource = null; resolve(); };
       const guard = setTimeout(finish, buffer.duration * 1000 + 10000);
       node.onended = finish; node.start();
     });
@@ -611,7 +772,18 @@ $('loginForm').addEventListener('submit', signIn);
 $('logout').addEventListener('click', logout);
 joinBtn.addEventListener('click', joinCall);
 leaveBtn.addEventListener('click', () => { endCall(true); setStatus('Ready'); });
-cancel.addEventListener('click', cancelRecording);
+
+// Audio settings: the gear in the corner opens microphone and speaker choices.
+const settingsBtn = $('settingsBtn'), settings = $('settings');
+function toggleSettings(open = settings.hidden) {
+  settings.hidden = !open; settingsBtn.setAttribute('aria-expanded', String(open));
+  if (open) { listDevices(); $('micSelect').focus(); }
+}
+settingsBtn.addEventListener('click', () => toggleSettings());
+document.addEventListener('pointerdown', event => {
+  if (!settings.hidden && !settings.contains(event.target) && !settingsBtn.contains(event.target)) toggleSettings(false);
+});
+settings.addEventListener('keydown', event => { if (event.key === 'Escape') { toggleSettings(false); settingsBtn.focus(); } });
 
 for (const [button, kind] of [[talk, 'call'], [record, 'message']]) {
   button.addEventListener('pointerdown', event => {

@@ -79,7 +79,7 @@ def main():
             before_text = r.inner_text("body")
             # One voice at a time: the page ignores talk while it is still playing the last clip.
             idle_by = time.time() + args.timeout
-            while time.time() < idle_by and not s.inner_text("#status").strip().startswith("Ready"):
+            while time.time() < idle_by and not s.inner_text("#status").strip().startswith("In call"):
                 time.sleep(0.25)
             btn = s.locator(TALK_SELECTORS).first
             btn.wait_for(state="visible", timeout=10000)

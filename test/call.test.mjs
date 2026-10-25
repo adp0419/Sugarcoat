@@ -87,7 +87,7 @@ test('speech flows sender to peer in both directions, with no audio for the send
     const id = lines.find(l => l.type === 'cleaned').id;
     const caption = await listener.waitFor(e => e.event === 'caption' && e.data.id === id);
     const clip = await listener.waitFor(e => e.event === 'clip' && e.data.id === id);
-    assert.deepEqual(caption.data, { id, from, text: MOCK_CLEANED });
+    assert.deepEqual(caption.data, { id, from, text: MOCK_CLEANED }, 'the peer never gets the raw transcript');
     assert.ok(caption.id < clip.id, 'caption precedes clip');
     assert.deepEqual({ ...clip.data, seconds: undefined }, { id, from, seq: 0, of: 1, mime: 'audio/mpeg', url: `/api/call/clip/${id}-0`, seconds: undefined });
     assert.ok(!other.events.some(e => e.data.id === id), 'sender gets neither caption nor clip');

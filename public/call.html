@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0a0a0a">
-  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#f8f5ef">
+  <meta name="color-scheme" content="light">
   <meta name="robots" content="noindex">
-  <meta name="description" content="Sugarcoat Comms: voice messages that arrive as polished text, and voice calls in your own cloned voice.">
-  <title>Sugarcoat Comms</title>
+  <meta name="description" content="Sugarcoat: voice messages that arrive as polished text, and voice calls in your own cloned voice.">
+  <title>Sugarcoat</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/call.css">
   <script type="module" src="/call.js"></script>
@@ -18,7 +18,7 @@
     <form id="loginForm" class="login-card" novalidate>
       <div class="brand login-brand">
         <svg class="mark" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v4m5-9v14m5-18v22m5-18v14m5-9v4"/></svg>
-        <span>Sugarcoat</span><span class="edition">Comms</span>
+        <span>Sugarcoat</span>
       </div>
       <h1>Welcome back</h1>
       <p class="hint">Sign in to message and call your team.</p>
@@ -36,7 +36,7 @@
     <nav class="rail" aria-label="Direct messages">
       <div class="rail-brand brand">
         <svg class="mark" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v4m5-9v14m5-18v22m5-18v14m5-9v4"/></svg>
-        <span>Sugarcoat</span><span class="edition">Comms</span>
+        <span>Sugarcoat</span>
       </div>
       <h2 class="rail-heading">Direct messages</h2>
       <ul class="dm-list">
@@ -45,20 +45,66 @@
           <span class="dm-text"><span id="peerNameRail" class="dm-name"></span><span id="peerState" class="dm-state">Offline</span></span>
           <span id="peerDot" class="status-dot" data-state="offline" aria-hidden="true"></span>
         </button></li>
+        <!-- Demo contacts: decoration only. -->
+        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+          <span class="avatar" data-tone="1" aria-hidden="true">M</span>
+          <span class="dm-text"><span class="dm-name">Maya Chen</span><span class="dm-state">Online</span></span>
+          <span class="badge" aria-label="4 unread">4</span>
+        </button></li>
+        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+          <span class="avatar" data-tone="2" aria-hidden="true">J</span>
+          <span class="dm-text"><span class="dm-name">Jordan Alvarez</span><span class="dm-state">In a meeting</span></span>
+          <span class="badge" aria-label="1 unread">1</span>
+        </button></li>
+        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+          <span class="avatar" data-tone="3" aria-hidden="true">P</span>
+          <span class="dm-text"><span class="dm-name">Priya Nair</span><span class="dm-state">Away</span></span>
+        </button></li>
+        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+          <span class="avatar" data-tone="4" aria-hidden="true">D</span>
+          <span class="dm-text"><span class="dm-name">Dev Team</span><span class="dm-state">6 members</span></span>
+          <span class="badge" aria-label="7 unread">7</span>
+        </button></li>
+        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+          <span class="avatar" data-tone="5" aria-hidden="true">S</span>
+          <span class="dm-text"><span class="dm-name">Sam Okafor</span><span class="dm-state">Offline</span></span>
+        </button></li>
+        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+          <span class="avatar" data-tone="6" aria-hidden="true">L</span>
+          <span class="dm-text"><span class="dm-name">Leah Brooks</span><span class="dm-state">Online</span></span>
+          <span class="badge" aria-label="2 unread">2</span>
+        </button></li>
       </ul>
       <div class="me-panel">
         <span class="avatar" id="meAvatar" aria-hidden="true"></span>
         <span class="dm-text"><span id="meName" class="dm-name"></span><span id="connection" class="dm-state" role="status" data-state="idle">Not connected</span></span>
+        <button id="settingsBtn" class="icon-button" type="button" aria-label="Audio settings" title="Audio settings" aria-expanded="false" aria-controls="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
         <button id="logout" class="icon-button" type="button" aria-label="Log out" title="Log out">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg>
         </button>
+        <div id="settings" class="settings" role="group" aria-labelledby="settingsTitle" hidden>
+          <h2 id="settingsTitle" class="settings-title">Audio</h2>
+          <label class="device" for="micSelect">
+            <span class="device-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"/></svg></span>
+            <span class="device-text"><span class="device-name">Microphone</span>
+            <select id="micSelect"><option value="">Default microphone</option></select></span>
+          </label>
+          <label class="device" for="speakerSelect">
+            <span class="device-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg></span>
+            <span class="device-text"><span class="device-name">Speaker</span>
+            <select id="speakerSelect"><option value="">Default speaker</option></select></span>
+          </label>
+          <button id="listDevices" class="secondary" type="button">Allow microphone to show device names</button>
+          <p id="deviceNote" class="hint" role="status"></p>
+        </div>
       </div>
     </nav>
 
     <section class="dm" aria-labelledby="dmTitle">
       <header class="dm-header">
         <div class="dm-title">
-          <span class="at" aria-hidden="true">@</span>
           <h1 id="dmTitle"></h1>
           <p id="presence" class="presence" role="status" data-state="idle"><span class="dot" aria-hidden="true"></span><span id="presenceText"></span></p>
         </div>
@@ -76,32 +122,39 @@
       <!-- Voice call (shown after Join call) -->
       <section id="callPanel" class="call-panel" aria-labelledby="callLabel" hidden>
         <h2 id="callLabel" class="visually-hidden">Voice call</h2>
-        <div class="tiles">
-          <div class="tile" id="tileMe" data-state="in"><span class="avatar big" id="tileMeAvatar" aria-hidden="true"></span><span id="tileMeName"></span><span class="tile-state">In call</span></div>
-          <div class="tile" id="tilePeer" data-state="out"><span class="avatar big" id="tilePeerAvatar" aria-hidden="true"></span><span id="tilePeerName"></span><span class="tile-state" id="tilePeerState">Not joined</span></div>
-        </div>
-        <div class="call-controls">
-          <p id="status" role="status" aria-live="polite" data-state="ready"><span class="dot" aria-hidden="true"></span><span id="statusText">Ready</span></p>
-          <button id="talk" class="talk" type="button" disabled aria-describedby="talkHint">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
-            <span id="talkLabel">Hold to Talk</span>
-          </button>
-          <p id="talkHint" class="hint keyboard-hint"><span id="hintText"></span> <span id="hintKeys" hidden>Hold the button, or hold <kbd>Space</kbd>. They hear you in your cloned voice.</span></p>
-          <div class="call-row">
-            <button id="cancel" class="secondary" type="button" disabled>Cancel <kbd aria-hidden="true">Esc</kbd></button>
-            <button id="enable" class="secondary playback-recovery" type="button" hidden>Enable playback</button>
+
+        <div class="live" aria-labelledby="liveLabel">
+          <div class="live-head">
+            <h3 id="liveLabel">Live transcript</h3>
+            <span class="rec"><span class="rec-dot" aria-hidden="true"></span>Recording</span>
           </div>
-          <details id="devices" class="devices">
-            <summary>Microphone and speaker</summary>
-            <div class="devices-body">
-              <label for="micSelect">Microphone</label>
-              <select id="micSelect"><option value="">Default microphone</option></select>
-              <label for="speakerSelect">Speaker</label>
-              <select id="speakerSelect"><option value="">Default speaker</option></select>
-              <button id="listDevices" class="secondary" type="button">Allow microphone to show device names</button>
-              <p id="deviceNote" class="hint" role="status"></p>
+          <div id="liveWrap" class="live-wrap"></div>
+          <p id="liveEmpty" class="hint live-empty">What you both say appears here, with Sugarcoat’s edits marked.</p>
+        </div>
+
+        <div class="side">
+          <div class="tiles">
+            <div class="tile" id="tileMe" data-state="in">
+              <span class="avatar" id="tileMeAvatar" aria-hidden="true"></span>
+              <span class="tile-text"><span id="tileMeName" class="tile-name"></span><span class="tile-state">In call</span></span>
+              <span class="meter" id="meterMe" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
             </div>
-          </details>
+            <div class="tile" id="tilePeer" data-state="out">
+              <span class="avatar" id="tilePeerAvatar" aria-hidden="true"></span>
+              <span class="tile-text"><span id="tilePeerName" class="tile-name"></span><span id="status" class="tile-state" role="status" aria-live="polite" data-state="ready"><span id="statusText">In call</span></span></span>
+              <span class="meter" id="meterPeer" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ptt-zone">
+          <button id="talk" class="ptt" type="button" disabled aria-describedby="talkHint">
+            <span class="ptt-ring" aria-hidden="true"></span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
+          </button>
+          <span id="talkLabel" class="ptt-label">Hold to talk</span>
+          <p id="talkHint" class="hint keyboard-hint"><span id="hintText"></span></p>
+          <button id="enable" class="secondary playback-recovery" type="button" hidden>Enable playback</button>
         </div>
       </section>
 
@@ -111,7 +164,7 @@
         <div id="logEmpty" class="log-empty">
           <span class="avatar big" id="emptyAvatar" aria-hidden="true"></span>
           <p class="empty-title" id="emptyTitle"></p>
-          <p class="hint">Hold the mic below to send a voice message. It arrives as clean, professional text. Join the call to talk in your cloned voice.</p>
+          <p class="hint">Hold the circle below to send a voice message. It arrives as clean, professional text. Join the call to talk in your cloned voice.</p>
         </div>
         <span id="logState" class="visually-hidden">No messages yet</span>
       </div>
@@ -120,10 +173,11 @@
       <footer class="composer">
         <p id="error" class="error" role="alert" hidden></p>
         <div class="composer-bar">
-          <button id="record" class="record" type="button" disabled>
+          <button id="record" class="ptt small" type="button" disabled aria-labelledby="recordLabel">
+            <span class="ptt-ring" aria-hidden="true"></span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"/></svg>
-            <span id="recordLabel">Hold to record a voice message</span>
           </button>
+          <span id="recordLabel" class="visually-hidden">Hold to record a voice message</span>
           <p id="composerHint" class="hint"></p>
         </div>
       </footer>
