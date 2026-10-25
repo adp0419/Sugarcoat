@@ -22,3 +22,10 @@ create table if not exists public.messages (
 create index if not exists messages_created_at on public.messages (created_at desc);
 alter table public.messages enable row level security;
 grant select, insert, delete on public.messages to service_role;
+
+-- History v2: call start/end markers (one row per person) and whether a call line was heard.
+alter table public.messages drop constraint if exists messages_kind_check;
+alter table public.messages add constraint messages_kind_check check (kind in ('message','call','call_start','call_end'));
+alter table public.messages add column if not exists status text check (status in ('heard','failed'));
+grant update on public.messages to service_role;
+notify pgrst, 'reload schema';

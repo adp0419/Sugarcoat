@@ -294,21 +294,30 @@ function callMark(text, end = false) {
   mark.innerHTML = PHONE; mark.append(text);
   return mark;
 }
-function startCallGroup() {
-  if (callGroup) return;
+// A call record's frame; saved history builds the same one for past calls.
+function newCallGroup(startedAt) {
   const li = document.createElement('li'); li.className = 'call-group';
   const note = document.createElement('p'); note.className = 'note'; note.textContent = 'Call in progress. Follow along in the live transcript above.';
-  li.append(callMark(`Call started · ${stamp(new Date())}`), note); log.append(li);
+  li.append(callMark(`Call started · ${stamp(new Date(startedAt))}`), note);
   const list = document.createElement('ol'); list.className = 'call-list';
-  $('liveWrap').replaceChildren(list);
-  callGroup = { li, list, note, entries: [], startedAt: Date.now() };
+  return { li, list, note, entries: [], startedAt };
+}
+function startCallGroup() {
+  if (callGroup) return;
+  callGroup = newCallGroup(Date.now());
+  log.append(callGroup.li); $('liveWrap').replaceChildren(callGroup.list);
   countEntries(); log.scrollTop = log.scrollHeight;
 }
 function endCallGroup() {
   const group = callGroup; if (!group) return;
   callGroup = null;
+  closeCallGroup(group, Date.now());
+  $('liveWrap').replaceChildren();
+  log.scrollTop = log.scrollHeight;
+}
+function closeCallGroup(group, endedAt) {
   const count = group.list.children.length;
-  const minutes = Math.max(1, Math.round((Date.now() - group.startedAt) / 60000));
+  const minutes = Math.max(1, Math.round((endedAt - group.startedAt) / 60000));
   group.note.textContent = 'No one spoke.'; group.note.hidden = count > 0;
   // The record keeps only the clean words, no edit marks.
   for (const entry of group.entries) { entry.final = true; if (entry.cleaned) setText(entry, entry.cleaned); }
@@ -323,9 +332,7 @@ function endCallGroup() {
     group.li.classList.add('collapsed'); label(false);
     group.li.append(more);
   }
-  group.li.append(callMark(`Call ended · ${stamp(new Date())} · ${minutes} min · ${count} message${count === 1 ? '' : 's'}`, true));
-  $('liveWrap').replaceChildren();
-  log.scrollTop = log.scrollHeight;
+  group.li.append(callMark(`Call ended · ${stamp(new Date(endedAt))} · ${minutes} min · ${count} message${count === 1 ? '' : 's'}`, true));
 }
 
 /* ---------- Level meters (mic while you hold, the other voice while it plays) ---------- */
@@ -459,8 +466,17 @@ async function openStream() {
 }
 
 /* ---------- Saved history ---------- */
-// Earlier messages with your peer, saved on the server when accounts are on. They go
-// above anything that arrived while loading; ids already on screen are skipped.
+// Your saved conversation with your peer (accounts only), rebuilt the way it looked
+// live: messages with their status, and each of your calls as its collapsed record.
+// It goes above anything that arrived while loading; ids already on screen are skipped.
+function historyMark(row, mine, inGroup) {
+  const peer = nameOf(peerOf(me));
+  if (row.kind === 'message') return mine ? [`Delivered to ${peer}`, 'heard'] : ['', ''];
+  if (row.status === 'heard') return mine ? [`Heard by ${peer}`, 'heard'] : ['Heard', 'heard'];
+  if (row.status === 'failed') return mine ? ['Not delivered', 'failed'] : ['Couldn’t play', 'failed'];
+  if (mine) return [`Sent. Waiting for ${peer}`, 'waiting'];
+  return inGroup ? ['Left before it played', 'failed'] : ['Said in the call', ''];
+}
 async function loadHistory(peer) {
   let rows;
   try {
@@ -469,20 +485,35 @@ async function loadHistory(peer) {
     rows = (await response.json()).messages;
   } catch { return; }
   if (!Array.isArray(rows) || !rows.length || peer !== peerOf(me)) return;
-  const box = threadFor(peer), first = box.firstChild;
+  const box = threadFor(peer), first = box.firstChild, shown = new Set();
+  for (const li of box.querySelectorAll('[data-id]')) shown.add(li.dataset.id);
+  const timeOf = row => { const at = Date.parse(row.at); return Number.isNaN(at) ? Date.now() : at; };
+  let group = null, lastAt = 0;
+  const close = endedAt => { closeCallGroup(group, endedAt); group = null; };
   for (const row of rows) {
-    if (!row?.id || box.querySelector(`[data-id="${CSS.escape(String(row.id))}"]`)) continue;
-    const entry = addEntry(row.from === me ? 'you' : 'peer', String(row.text || ''), '', '', row.kind === 'call' ? 'call' : 'message', peer);
-    entry.li.dataset.id = row.id;
-    const at = new Date(row.at), time = entry.li.querySelector('time');
-    if (time && !Number.isNaN(at.getTime())) {
-      time.dateTime = at.toISOString();
-      const sameDay = at.toDateString() === new Date().toDateString();
-      time.textContent = sameDay ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-        : at.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    if (!row?.id) continue;
+    const at = timeOf(row);
+    // Call markers are per person: only yours frame a call on your side.
+    if (row.kind === 'call_start' || row.kind === 'call_end') {
+      if (row.from !== me) continue;
+      if (group) close(row.kind === 'call_end' ? at : lastAt || at);
+      if (row.kind === 'call_start') { group = newCallGroup(at); box.insertBefore(group.li, first); }
+      lastAt = at; continue;
     }
-    box.insertBefore(entry.li, first);
+    lastAt = at;
+    if (shown.has(row.id)) continue;
+    const mine = row.from === me, kind = row.kind === 'call' ? 'call' : 'message';
+    const inGroup = kind === 'call' && !!group;
+    const [mark, state] = historyMark(row, mine, inGroup);
+    const entry = addEntry(mine ? 'you' : 'peer', String(row.text || ''), mark, state, kind, peer);
+    entry.li.dataset.id = row.id; entry.cleaned = String(row.text || '');
+    const time = entry.li.querySelector('time');
+    time.dateTime = new Date(at).toISOString();
+    time.textContent = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (inGroup) { group.list.append(entry.li); group.entries.push(entry); }
+    else box.insertBefore(entry.li, first);
   }
+  if (group) close(lastAt); // the tab closed mid-call: end the record at the last thing saved
   countEntries();
   if (box === log) log.scrollTop = log.scrollHeight;
 }

@@ -50,6 +50,7 @@ function fakeBackend() {
       assert.equal(init.headers.apikey, 'sb_secret_test');
       if (!messagesTable) return reply(404, { code: 'PGRST205' });
       if (method === 'POST') { messages.push(body); return reply(201); }
+      if (method === 'PATCH') { Object.assign(messages.find(m => m.id === url.searchParams.get('id').replace('eq.', '')), body); return reply(204); }
       const pair = url.searchParams.get('from_handle');
       assert.equal(pair, url.searchParams.get('to_handle'));
       return reply(200, messages.filter(m => pair.includes(m.from_handle) && pair.includes(m.to_handle))
@@ -208,4 +209,25 @@ test('chat history: Aryan↔Rohit text is saved and comes back in order; test co
   backend.dropMessagesTable(); // table not created yet: delivery still works, history is just empty
   await send(aryan);
   assert.deepEqual((await (await call('/api/call/history', aryan)).json()).messages, []);
+});
+
+test('chat history: a call saves start/end markers per person and marks lines heard', async t => {
+  const synthesize = async ({ text }) => ({ format: { encoding: 'encoded', mimeType: 'audio/mpeg' }, stream: (async function* () { yield Buffer.from(`voice:${text}`); })() });
+  const { base, backend, signIn } = await fixture(t, { callToken: '' }, { synthesize });
+  const aryan = await signIn('aryan@example.com'), rohit = await signIn('rohit@example.com');
+  const call = (path, token, init = {}) => fetch(`${base}${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`, init);
+  const voice = (token, value) => call('/api/call/voice', token, { method: 'POST', body: JSON.stringify({ in: value }) });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 10));
+  await call('/api/call/poll', aryan); await call('/api/call/poll', rohit);
+  await voice(aryan, true); await settle(); await voice(rohit, true); await settle();
+  const spoken = await call('/api/call/speak', aryan, { method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: Buffer.from('audio') });
+  const id = (await spoken.text()).split('\n').filter(Boolean).map(JSON.parse).find(l => l.type === 'cleaned').id;
+  await settle();
+  assert.equal((await call('/api/call/ack', rohit, { method: 'POST', body: JSON.stringify({ id }) })).status, 200);
+  await settle(); await voice(aryan, false); await settle();
+
+  const rows = (await (await call('/api/call/history', aryan)).json()).messages;
+  assert.deepEqual(rows.map(m => [m.from, m.kind]), [['aryan', 'call_start'], ['rohit', 'call_start'], ['aryan', 'call'], ['aryan', 'call_end']]);
+  assert.equal(rows.find(m => m.id === id).status, 'heard');
+  assert.ok(backend.messages.find(m => m.id === id).created_at <= rows.at(-1).at);
 });
