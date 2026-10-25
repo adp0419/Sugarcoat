@@ -86,8 +86,8 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--focus); out
 .join-call:hover:not(:disabled) { background: color-mix(in srgb, var(--success) 85%, var(--foreground)); }
 .join-call:disabled { border-color: var(--control-border); background: var(--surface); color: var(--muted); }
 .join-call svg { width: 18px; height: 18px; }
-.leave-call { border: 1px solid var(--error); background: transparent; color: var(--error); }
-.leave-call:hover { background: color-mix(in srgb, var(--error) 14%, var(--background)); }
+.leave-call { border: 1px solid var(--error); background: var(--error); color: var(--background); }
+.leave-call:hover { background: color-mix(in srgb, var(--error) 85%, var(--foreground)); }
 .banner { padding: 12px var(--space-4); border-bottom: 1px solid var(--border); }
 
 /* Voice call panel */
