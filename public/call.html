@@ -25,7 +25,13 @@
       <label id="usernameLabel" for="username">Username</label>
       <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
       <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <div class="password-field">
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button id="revealPassword" class="reveal" type="button" aria-label="Show password" aria-pressed="false" aria-controls="password" title="Show password">
+          <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.9 4.2A9.7 9.7 0 0 1 12 4c6.5 0 10 8 10 8a17 17 0 0 1-2.2 3.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 8 10 8c1.9 0 3.6-.6 5-1.5M9.9 9.9a3 3 0 0 0 4.2 4.2M2 2l20 20"/></svg>
+        </button>
+      </div>
       <p id="loginError" class="error" role="alert" hidden></p>
       <button id="signIn" class="talk" type="submit">Sign in</button>
       <!-- Shown only when accounts are enabled on the server. -->

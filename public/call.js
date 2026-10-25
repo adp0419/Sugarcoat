@@ -424,6 +424,7 @@ async function openStream() {
 
 /* ---------- Sign in / out ---------- */
 function showLogin(message = '') {
+  showPassword(false);
   $('app').hidden = true; $('login').hidden = false;
   $('loginError').textContent = message; $('loginError').hidden = !message;
   document.title = 'Sign in · Sugarcoat';
@@ -797,6 +798,15 @@ function stopPlayback() {
 
 /* ---------- Wiring ---------- */
 $('loginForm').addEventListener('submit', signIn);
+// Eye button: show or hide the password while typing.
+function showPassword(visible) {
+  $('password').type = visible ? 'text' : 'password';
+  const label = visible ? 'Hide password' : 'Show password';
+  $('revealPassword').setAttribute('aria-pressed', String(visible));
+  $('revealPassword').setAttribute('aria-label', label); $('revealPassword').title = label;
+}
+$('revealPassword').addEventListener('click', () => { showPassword($('password').type === 'password'); $('password').focus(); });
+$('loginForm').addEventListener('submit', () => showPassword(false), true);
 $('signUp').addEventListener('click', () => signIn(null, true));
 
 // Twinly key (accounts only): saved encrypted on the server, checked with Twinly first.

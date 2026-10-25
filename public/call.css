@@ -366,3 +366,13 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
 .twinly-actions { display: flex; gap: 8px; }
 .twinly-actions .secondary { flex: 1; }
 .login-card #signUp { margin-top: 0; }
+
+/* Password field with a show/hide eye button */
+.password-field { position: relative; display: flex; }
+.password-field input { flex: 1; min-width: 0; padding-right: 48px; }
+.reveal { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); display: grid; place-items: center; width: 40px; height: 36px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; }
+.reveal:hover { color: var(--foreground); }
+.reveal:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.reveal svg { width: 20px; height: 20px; }
+.reveal .eye-closed, .reveal[aria-pressed="true"] .eye-open { display: none; }
+.reveal[aria-pressed="true"] .eye-closed { display: block; }
