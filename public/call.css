@@ -374,3 +374,39 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
 .reveal svg { width: 20px; height: 20px; }
 .reveal .eye-closed, .reveal[aria-pressed="true"] .eye-open { display: none; }
 .reveal[aria-pressed="true"] .eye-closed { display: block; }
+
+/* Phones: the sidebar becomes a drawer over the conversation ------------- */
+.menu-button { display: none; }
+.scrim { display: none; }
+@media (max-width: 759px) {
+  .app { display: block; height: 100vh; height: 100dvh; min-height: 0; }
+  .dm { height: 100%; min-height: 0; }
+
+  .rail { position: fixed; inset: 0 auto 0 0; z-index: 40; width: min(86vw, 320px); border-right: 1px solid var(--border); border-bottom: 0;
+    box-shadow: 0 12px 40px rgb(42 40 38 / .22); transform: translateX(-102%); visibility: hidden;
+    transition: transform 220ms ease, visibility 0s linear 220ms; }
+  .app[data-drawer="open"] .rail { transform: none; visibility: visible; transition: transform 220ms ease; }
+  .rail-brand { display: flex; }
+  .rail-heading { display: block; }
+  .dm-item.contact { display: flex; }
+  .dm-list { padding: 0 var(--space-2); }
+  .scrim { position: fixed; inset: 0; z-index: 30; display: block; background: rgb(42 40 38 / .45); }
+  .scrim[hidden] { display: none; }
+
+  .menu-button { display: grid; flex: none; margin-left: -6px; color: var(--foreground); }
+  .dm-header { flex-direction: row; align-items: center; gap: var(--space-2); min-height: 56px; padding: 8px var(--space-3); }
+  .dm-title { flex: 1; gap: 2px 10px; }
+  .dm-title h1 { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dm-title .presence { width: 100%; font-size: 12px; }
+  .call-actions .join-call, .call-actions .leave-call { min-height: 38px; padding: 6px 12px; font-size: 14px; }
+
+  .call-panel { flex: none; max-height: 62dvh; overflow-y: auto; gap: var(--space-3); padding: var(--space-3); }
+  .live-wrap { max-height: 28dvh; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tile { min-height: 0; }
+  .log { max-height: none; }
+  .composer { padding: 8px var(--space-3) calc(12px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 759px) and (prefers-reduced-motion: reduce) {
+  .rail, .app[data-drawer="open"] .rail { transition: none; }
+}

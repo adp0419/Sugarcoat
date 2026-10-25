@@ -545,8 +545,24 @@ function openChat(id) {
 }
 document.querySelector('.dm-list').addEventListener('click', event => {
   const item = event.target.closest('.dm-item[data-chat]');
-  if (item) openChat(item.dataset.chat);
+  if (item) { openChat(item.dataset.chat); setDrawer(false); }
 });
+
+// Phones: the sidebar slides over the conversation, which is greyed out and inert meanwhile.
+const phone = matchMedia('(max-width: 759px)');
+function setDrawer(open) {
+  open &&= phone.matches;
+  const wasOpen = $('app').dataset.drawer === 'open';
+  $('app').dataset.drawer = open ? 'open' : '';
+  $('scrim').hidden = !open; $('dm').inert = open;
+  $('menuBtn').setAttribute('aria-expanded', String(open));
+  if (open) (document.querySelector('.dm-item[aria-current="page"]') || $('rail')).focus();
+  else if (wasOpen && phone.matches) $('menuBtn').focus();
+}
+$('menuBtn').addEventListener('click', () => setDrawer(true));
+$('scrim').addEventListener('click', () => setDrawer(false));
+$('rail').addEventListener('keydown', event => { if (event.key === 'Escape' && settings.hidden) setDrawer(false); });
+phone.addEventListener('change', () => setDrawer(false));
 
 /* ---------- Voice call ---------- */
 async function joinCall() {
