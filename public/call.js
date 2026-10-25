@@ -6,6 +6,12 @@ import { getSession, signIn as accountSignIn, signOut, accessToken, authFetch } 
 const $ = id => document.getElementById(id);
 const talk = $('talk'), record = $('record'), joinBtn = $('join'), leaveBtn = $('leave'), enableBtn = $('enable');
 const NAMES = { aryan: 'Aryan', rohit: 'Rohit' };
+// Test contacts in the sidebar. The server answers for them and they are always online:
+// a voice message gets a reply, and in a call they play your own cloned voice back to you.
+const CONTACTS = { maya: 'Maya Chen', jordan: 'Jordan Alvarez', priya: 'Priya Nair', dev: 'Dev Team', sam: 'Sam Okafor', leah: 'Leah Brooks' };
+const TONES = { maya: 1, jordan: 2, priya: 3, dev: 4, sam: 5, leah: 6 };
+const isContact = who => Object.hasOwn(CONTACTS, who);
+const nameOf = who => NAMES[who] || CONTACTS[who] || 'the other person';
 // Demo accounts, checked in the page only. The link's token still guards the server.
 const ACCOUNTS = { aryan: '1234', rohit: '4321' };
 const MIN_HOLD_MS = 300, MAX_RECORD_MS = 60000;
@@ -25,6 +31,7 @@ const lsSet = (key, value) => { try { value ? localStorage.setItem(key, value) :
 const pick = value => (value = String(value || '').toLowerCase().trim()) in NAMES ? value : '';
 
 let me = '';
+let chat = ''; // the open conversation: the peer's name or a test contact
 let signedIn = false, connected = false, everOpened = false, errorsInRow = 0;
 let inCall = false, peerInCall = false, peerOnline = false;
 let connectId = 0, pollAbort;
@@ -35,8 +42,10 @@ const queue = [];          // peer call utterances in arrival order
 const sentPending = [];    // my call utterances waiting for "delivered"
 
 const peerOf = who => (who === 'aryan' ? 'rohit' : 'aryan');
-const peerName = () => NAMES[peerOf(me)] || 'the other person';
-const initial = who => (NAMES[who] || '?')[0];
+const peerName = () => nameOf(chat || peerOf(me));
+const initial = who => (NAMES[who] || CONTACTS[who] || '?')[0];
+const chatOnline = () => isContact(chat) || peerOnline;
+const chatInCall = () => (isContact(chat) ? inCall : peerInCall);
 
 /* ---------- Status and errors ---------- */
 // The call status shows under the other person's name in their call card.
@@ -52,7 +61,7 @@ function showError(text) { $('error').textContent = text; $('error').hidden = fa
 function hideError() { $('error').hidden = true; $('error').textContent = ''; }
 function setLinkError(text) { $('linkError').textContent = text || ''; $('linkError').hidden = !text; }
 function setConnection(text, state) { $('connection').textContent = text; $('connection').dataset.state = state; }
-function setAvatar(el, who) { el.textContent = initial(who); el.dataset.who = who; }
+function setAvatar(el, who) { el.textContent = initial(who); el.dataset.who = who; el.dataset.tone = TONES[who] || ''; }
 
 function micError(error) {
   const name = error?.name;
@@ -85,13 +94,15 @@ function refresh() {
   const playing = incomingBusy();
   const peer = peerName();
 
-  // Presence: sidebar, header, call tiles.
-  const state = !connected ? 'offline' : peerInCall ? 'call' : peerOnline ? 'online' : 'offline';
-  const words = { offline: 'Offline', online: 'Online', call: 'In the call' }[state];
-  $('peerDot').dataset.state = state; $('peerState').textContent = words; $('peerState').dataset.state = state;
+  // Presence: sidebar (the real peer), header and call tiles (the open chat).
+  const words = { offline: 'Offline', online: 'Online', call: 'In the call' };
+  const peerState = !connected ? 'offline' : peerInCall ? 'call' : peerOnline ? 'online' : 'offline';
+  $('peerDot').dataset.state = peerState; $('peerState').textContent = words[peerState]; $('peerState').dataset.state = peerState;
+  const state = !connected ? 'offline' : chatInCall() ? 'call' : chatOnline() ? 'online' : 'offline';
   $('presence').dataset.state = state;
-  $('presenceText').textContent = state === 'call' ? (inCall ? `${peer} is in the call with you` : `${peer} is in the call. Join them.`) : words;
-  $('tilePeer').dataset.state = playing && inCall ? 'speaking' : peerInCall ? 'in' : 'out';
+  $('presenceText').textContent = state === 'call' ? (inCall ? `${peer} is in the call with you` : `${peer} is in the call. Join them.`)
+    : isContact(chat) && state === 'online' ? 'Test contact · always online' : words[state];
+  $('tilePeer').dataset.state = playing && inCall ? 'speaking' : chatInCall() ? 'in' : 'out';
   $('tileMe').dataset.state = rec?.kind === 'call' ? 'speaking' : 'in';
 
   // Call controls.
@@ -100,7 +111,7 @@ function refresh() {
   let label = 'Hold to talk', reason = '', disabled = false;
   if (!connected) { disabled = true; reason = 'Reconnecting. You can talk again once the call is back.'; }
   else if (rec?.kind === 'call') { label = 'Release to send'; reason = 'Release to send.'; }
-  else if (!peerInCall) { disabled = true; reason = `Waiting for ${peer} to join the call.`; }
+  else if (!chatInCall()) { disabled = true; reason = `Waiting for ${peer} to join the call.`; }
   else if (rec || sending) { disabled = true; label = sending ? 'Sending…' : 'Hold to talk'; reason = 'Finish your other message first.'; }
   else if (playing) { disabled = true; label = `${peer} is speaking`; reason = `Waiting for ${peer} to finish. One voice at a time.`; }
   talk.disabled = disabled;
@@ -111,34 +122,55 @@ function refresh() {
   if (inCall && !rec && !sending) {
     if (!connected) setStatus('Reconnecting', 'processing');
     else if (playing) setStatus(`${peer} is speaking`, 'speaking');
-    else if (!peerInCall) setStatus(`Waiting for ${peer}`, 'processing');
+    else if (!chatInCall()) setStatus(`Waiting for ${peer}`, 'processing');
     else if (['Reconnecting', `${peer} is speaking`, `Waiting for ${peer}`].includes(statusRaw)) setStatus('Ready');
   }
 
   // Voice message composer.
   const held = rec?.kind === 'message';
-  record.disabled = !connected || (!!rec && !held) || sending || !peerOnline;
+  record.disabled = !connected || (!!rec && !held) || sending || !chatOnline();
   record.dataset.held = held ? 'true' : 'false';
   $('recordLabel').textContent = held ? 'Release to send' : sending && !rec ? 'Polishing…' : 'Hold to record a voice message';
   // Only the circle shows, unless there's a reason it can't be used.
-  $('composerHint').textContent = connected && !peerOnline ? `${peer} is offline. Voice messages send once they sign in.` : '';
+  $('composerHint').textContent = connected && !chatOnline() ? `${peer} is offline. Voice messages send once they sign in.` : '';
 }
 
 /* ---------- Thread ---------- */
-const log = $('log');
+let log = $('log');
+const threads = new Map(); // conversation -> its <ol>
+function threadFor(id) {
+  if (!threads.has(id)) {
+    const list = document.createElement('ol');
+    list.className = 'log'; list.hidden = true; list.tabIndex = 0;
+    list.setAttribute('role', 'log'); list.setAttribute('aria-live', 'polite');
+    list.setAttribute('aria-relevant', 'additions'); list.setAttribute('aria-labelledby', 'dmTitle');
+    $('log').after(list); threads.set(id, list);
+  }
+  return threads.get(id);
+}
+// Count a message that arrived in a conversation you're not looking at.
+function bumpUnread(id) {
+  const item = document.querySelector(`.dm-item[data-chat="${id}"]`);
+  if (!item || id === chat) return;
+  let badge = item.querySelector('.badge');
+  if (!badge) { badge = document.createElement('span'); badge.className = 'badge'; item.append(badge); }
+  const count = Number(badge.textContent || 0) + 1;
+  badge.textContent = count; badge.setAttribute('aria-label', `${count} unread`);
+}
 const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 48;
 function countEntries() {
   const count = log.children.length;
   $('logState').textContent = count ? `${count} message${count === 1 ? '' : 's'}` : 'No messages yet';
 }
 // One message row: avatar, name, time and kind, the words, then a status line.
-function addEntry(who, text, mark, markState, kind = 'message') {
-  const follow = nearBottom();
-  const author = who === 'you' ? me : peerOf(me);
+function addEntry(who, text, mark, markState, kind = 'message', thread = chat) {
+  const box = threadFor(thread);
+  const follow = box === log && nearBottom();
+  const author = who === 'you' ? me : thread;
   const li = document.createElement('li'); li.className = 'turn'; li.dataset.who = who; li.dataset.kind = kind;
   const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.setAttribute('aria-hidden', 'true'); setAvatar(avatar, author);
   const meta = document.createElement('p'); meta.className = 'meta';
-  const label = document.createElement('span'); label.className = 'who'; label.textContent = NAMES[author];
+  const label = document.createElement('span'); label.className = 'who'; label.textContent = nameOf(author);
   const time = document.createElement('time'); const at = new Date();
   time.dateTime = at.toISOString(); time.textContent = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const tag = document.createElement('span'); tag.className = 'kind'; tag.dataset.kind = kind; tag.textContent = kind === 'call' ? 'In call · cloned voice' : 'Voice message';
@@ -146,9 +178,10 @@ function addEntry(who, text, mark, markState, kind = 'message') {
   const said = document.createElement('p'); said.className = 'said'; said.textContent = text;
   const markEl = document.createElement('span'); markEl.className = 'flag';
   li.append(avatar, meta, said, markEl);
-  (kind === 'call' && callGroup ? callGroup.list : log).append(li);
+  const inGroup = kind === 'call' && callGroup && thread === chat;
+  (inGroup ? callGroup.list : box).append(li);
   const entry = { li, said, markEl };
-  if (kind === 'call' && callGroup) callGroup.entries.push(entry);
+  if (inGroup) callGroup.entries.push(entry);
   setMark(entry, mark, markState);
   countEntries();
   if (follow || kind === 'call') followEntry(entry);
@@ -166,7 +199,7 @@ function setMark(entry, text, state = '') {
   entry.markEl.textContent = text; entry.markEl.dataset.state = state;
 }
 function removeEntry(entry) { entry?.li.remove(); countEntries(); }
-function followEntry(entry) { const box = entry.li.closest('.live-wrap') || log; box.scrollTop = box.scrollHeight; }
+function followEntry(entry) { const box = entry.li.closest('.live-wrap') || entry.li.closest('.log'); if (box) box.scrollTop = box.scrollHeight; }
 
 /* ---------- Edits view: raw words typed in live, then Sugarcoat's changes marked ---------- */
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -412,7 +445,7 @@ async function openStream() {
     errorsInRow = 0;
     peerOnline = !!body.peerOnline; peerInCall = !!body.peerInVoice;
     // The server forgot we were in the call (restart or long drop): tell it again.
-    if (inCall && body.inVoice === false) postJson('/api/call/voice', { in: true }).catch(() => {});
+    if (inCall && body.inVoice === false && !isContact(chat)) postJson('/api/call/voice', { in: true }).catch(() => {});
     for (const item of body.events || []) {
       if (cursor != null && item.id <= cursor) continue;
       try { handlers[item.event]?.(item.data); } catch (error) { console.error(error); }
@@ -434,13 +467,11 @@ function enterApp(who) {
   ssSet('vf-comms-user', me);
   const peer = peerOf(me);
   $('login').hidden = true; $('app').hidden = false;
-  document.title = `${NAMES[peer]} · Sugarcoat`;
   $('meName').textContent = NAMES[me]; setAvatar($('meAvatar'), me);
   $('peerNameRail').textContent = NAMES[peer]; setAvatar($('peerAvatar'), peer);
-  $('dmTitle').textContent = NAMES[peer]; $('emptyTitle').textContent = `This is the start of your conversation with ${NAMES[peer]}.`;
-  setAvatar($('emptyAvatar'), peer);
   $('tileMeName').textContent = `${NAMES[me]} (you)`; setAvatar($('tileMeAvatar'), me);
-  $('tilePeerName').textContent = NAMES[peer]; setAvatar($('tilePeerAvatar'), peer);
+  $('dmPeer').dataset.chat = peer; threads.set(peer, $('log'));
+  chat = ''; openChat(peer);
   setConnection('Connecting…', 'wait');
   if (!window.fetch || !window.AudioContext || !window.MediaRecorder) setLinkError('This browser can’t run calls. Use current Chrome, Safari, or Firefox.');
   else if (!window.isSecureContext) setLinkError('The microphone only works on localhost or HTTPS. Open the link you were given.');
@@ -479,6 +510,8 @@ function logout() {
   endCall(true);
   stopConnection(); signedIn = false; connected = false; peerOnline = false; peerInCall = false;
   cancelRecording(); releaseMic();
+  for (const list of threads.values()) if (list !== $('log')) list.remove();
+  threads.clear(); log = $('log'); log.hidden = false; chat = '';
   log.replaceChildren(); countEntries(); hideError(); setLinkError('');
   ctx?.close().catch(() => {}); ctx = null;
   ssSet('vf-comms-user', '');
@@ -486,12 +519,44 @@ function logout() {
   $('username').focus();
 }
 
+/* ---------- Conversations ---------- */
+const PEER_HINT = $('emptyHint').textContent;
+function openChat(id) {
+  if (!signedIn || id === chat) return;
+  if (rec) cancelRecording();
+  if (inCall) endCall(true); // one call at a time
+  hideError();
+  log.hidden = true; chat = id; log = threadFor(id); log.hidden = false;
+  for (const item of document.querySelectorAll('.dm-item[data-chat]')) {
+    if (item.dataset.chat === id) { item.setAttribute('aria-current', 'page'); item.querySelector('.badge')?.remove(); }
+    else item.removeAttribute('aria-current');
+  }
+  const name = nameOf(id);
+  document.title = `${name} · Sugarcoat`;
+  $('dmTitle').textContent = name; $('tilePeerName').textContent = name;
+  $('emptyTitle').textContent = `This is the start of your conversation with ${name}.`;
+  $('emptyHint').textContent = isContact(id)
+    ? `${name} is a test contact. Send a voice message and ${name} replies with what arrived. Join the call and ${name} plays your words back in your cloned voice.`
+    : PEER_HINT;
+  setAvatar($('emptyAvatar'), id); setAvatar($('tilePeerAvatar'), id);
+  countEntries(); refresh();
+}
+document.querySelector('.dm-list').addEventListener('click', event => {
+  const item = event.target.closest('.dm-item[data-chat]');
+  if (item) openChat(item.dataset.chat);
+});
+
 /* ---------- Voice call ---------- */
 async function joinCall() {
   hideError();
   ctx ||= new AudioContext({ latencyHint: 'interactive' });
   ctx.resume().catch(() => {}); applySink();
   joinBtn.disabled = true;
+  if (isContact(chat)) {
+    inCall = true; startCallGroup(); setStatus('Ready');
+    ensureMic().catch(error => showError(error.name === 'NotSupported' ? error.message : micError(error)));
+    refresh(); return;
+  }
   try {
     const response = await postJson('/api/call/voice', { in: true });
     if (response.status === 401) { invalidLink(); return; }
@@ -511,7 +576,7 @@ function endCall(tellServer) {
   queue.length = 0;
   const wasIn = inCall; inCall = false;
   endCallGroup();
-  if (wasIn && tellServer) postJson('/api/call/voice', { in: false }).catch(() => {});
+  if (wasIn && tellServer && !isContact(chat)) postJson('/api/call/voice', { in: false }).catch(() => {});
   refresh();
 }
 
@@ -574,12 +639,13 @@ async function sendRecording(run, mimeType) {
   const isCall = run.kind === 'call';
   const blob = new Blob(run.chunks, { type: mimeType }); run.chunks = [];
   if (!blob.size) { showError('Nothing was recorded. Try again.'); refresh(); return; }
+  const to = chat;
   sending = true; if (isCall) setStatus('Cleaning', 'processing'); refresh();
   const abort = new AbortController(), timeout = setTimeout(() => abort.abort(), 120000);
-  let entry = addEntry('you', '…', 'Transcribing', 'waiting', run.kind), cleanedText = '', finished = false;
+  let entry = addEntry('you', '…', 'Transcribing', 'waiting', run.kind, to), cleanedText = '', finished = false;
   setText(entry, '…', true);
   try {
-    const response = await fetch(withToken(isCall ? '/api/call/speak' : '/api/call/message'), { method: 'POST', headers: { 'Content-Type': mimeType }, body: blob, signal: abort.signal });
+    const response = await fetch(withToken(`${isCall ? '/api/call/speak' : '/api/call/message'}?to=${encodeURIComponent(to)}`), { method: 'POST', headers: { 'Content-Type': mimeType }, body: blob, signal: abort.signal });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw Object.assign(new Error(body.error || ''), { code: body.code, httpStatus: response.status });
@@ -614,8 +680,8 @@ async function sendRecording(run, mimeType) {
     if (pending.trim()) handle(pending.trim());
     if (!finished) throw Object.assign(new Error('dropped'), { dropped: true });
     if (!entry) { if (isCall) setStatus('No speech heard. Hold the button and try again.'); else showError('No speech heard. Hold the button and try again.'); }
-    else if (isCall) { setMark(entry, `Sent. Waiting for ${peerName()}`, 'waiting'); sentPending.push(entry); setStatus('Sent', 'ready'); }
-    else setMark(entry, `Delivered to ${peerName()}`, 'heard');
+    else if (isCall) { setMark(entry, `Sent. Waiting for ${nameOf(to)}`, 'waiting'); sentPending.push(entry); setStatus('Sent', 'ready'); }
+    else setMark(entry, `Delivered to ${nameOf(to)}`, 'heard');
   } catch (error) {
     const network = error instanceof TypeError || error.dropped;
     const text = error.name === 'AbortError' ? 'The server took too long. Try a shorter message.'
@@ -629,30 +695,34 @@ async function sendRecording(run, mimeType) {
 }
 
 /* ---------- Receiving: messages, captions and clips ---------- */
+const senderOf = data => { const from = String(data.from || ''); return from !== me && (NAMES[from] || isContact(from)) ? from : ''; };
 function onMessage(data) {
-  if (pick(data.from) === me) return;
-  addEntry('peer', String(data.text || ''), '', '', 'message');
+  const from = senderOf(data); if (!from) return;
+  addEntry('peer', String(data.text || ''), '', '', 'message', from);
+  bumpUnread(from);
 }
-function turnFor(id) {
+function turnFor(id, from = chat) {
   let turn = turns.get(id);
   if (!turn) {
     turn = { id, clips: new Map(), played: 0, of: 0, last: null, done: false, failed: false, createdAt: performance.now() };
     turns.set(id, turn);
-    if (inCall) queue.push(turn); else turn.done = true;
+    if (inCall && from === chat) queue.push(turn); else turn.done = true;
   }
   return turn;
 }
 function onCaption(data) {
-  if (data.id == null || pick(data.from) === me || turns.has(data.id)) return;
-  const turn = turnFor(data.id);
-  turn.entry = addEntry('peer', String(data.text || ''), inCall ? 'Waiting' : 'Said in the call', inCall ? 'waiting' : '', 'call');
+  const from = senderOf(data);
+  if (data.id == null || !from || turns.has(data.id)) return;
+  const turn = turnFor(data.id, from), live = inCall && from === chat;
+  turn.entry = addEntry('peer', String(data.text || ''), live ? 'Waiting' : 'Said in the call', live ? 'waiting' : '', 'call', from);
   turn.entry.cleaned = String(data.text || '');
   refresh(); pump();
 }
 function onClip(data) {
-  if (data.id == null || pick(data.from) === me) return;
-  const turn = turnFor(data.id);
-  if (!turn.entry) turn.entry = addEntry('peer', 'Voice message', 'Waiting', 'waiting', 'call');
+  const from = senderOf(data);
+  if (data.id == null || !from) return;
+  const turn = turnFor(data.id, from);
+  if (!turn.entry) turn.entry = addEntry('peer', 'Voice message', 'Waiting', 'waiting', 'call', from);
   if (turn.clips.has(data.seq) || turn.done) return;
   turn.clips.set(data.seq, data);
   turn.firstClipAt ??= performance.now();

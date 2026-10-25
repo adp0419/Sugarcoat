@@ -119,7 +119,7 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
 .log:empty { display: none; }
 .log:focus-visible { outline: 2px solid var(--focus); outline-offset: -4px; }
 .log-empty { flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: var(--space-2); padding: var(--space-4); }
-.log:not(:empty) ~ .log-empty { display: none; }
+.log:not(:empty):not([hidden]) ~ .log-empty { display: none; }
 .empty-title { margin: 0; font-size: 22px; font-weight: 600; }
 .log-empty .hint { margin: 0; max-width: 520px; }
 .turn { display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 12px; padding: 6px var(--space-4); }
@@ -184,8 +184,6 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
 
 /* Demo contacts and unread badges */
 .dm-list { display: flex; flex-direction: column; gap: 2px; }
-.dm-item.demo { cursor: default; }
-.dm-item.demo:hover { background: color-mix(in srgb, var(--foreground) 4%, var(--surface)); }
 .avatar[data-tone="1"] { background: #e9dcf2; border-color: #c4a8d8; }
 .avatar[data-tone="2"] { background: #dbe7f3; border-color: #a9c1db; }
 .avatar[data-tone="3"] { background: #f3e3cf; border-color: #d8b78f; }
@@ -277,7 +275,7 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
   .live { grid-column: 1 / -1; order: 3; }
 }
 @media (max-width: 759px) {
-  .dm-item.demo { display: none; }
+  .dm-item.contact { display: none; }
   .call-panel { grid-template-columns: minmax(0, 1fr); }
   .live { order: 3; }
   .call-group { margin-left: var(--space-3); margin-right: var(--space-3); }

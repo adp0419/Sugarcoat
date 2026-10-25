@@ -53,31 +53,31 @@
           <span class="dm-text"><span id="peerNameRail" class="dm-name"></span><span id="peerState" class="dm-state">Offline</span></span>
           <span id="peerDot" class="status-dot" data-state="offline" aria-hidden="true"></span>
         </button></li>
-        <!-- Demo contacts: decoration only. -->
-        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+        <!-- Test contacts: always online; the server replies and plays your cloned voice back. -->
+        <li><button class="dm-item contact" type="button" data-chat="maya" title="Test contact">
           <span class="avatar" data-tone="1" aria-hidden="true">M</span>
           <span class="dm-text"><span class="dm-name">Maya Chen</span><span class="dm-state">Online</span></span>
           <span class="badge" aria-label="4 unread">4</span>
         </button></li>
-        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+        <li><button class="dm-item contact" type="button" data-chat="jordan" title="Test contact">
           <span class="avatar" data-tone="2" aria-hidden="true">J</span>
           <span class="dm-text"><span class="dm-name">Jordan Alvarez</span><span class="dm-state">In a meeting</span></span>
           <span class="badge" aria-label="1 unread">1</span>
         </button></li>
-        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+        <li><button class="dm-item contact" type="button" data-chat="priya" title="Test contact">
           <span class="avatar" data-tone="3" aria-hidden="true">P</span>
           <span class="dm-text"><span class="dm-name">Priya Nair</span><span class="dm-state">Away</span></span>
         </button></li>
-        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+        <li><button class="dm-item contact" type="button" data-chat="dev" title="Test contact">
           <span class="avatar" data-tone="4" aria-hidden="true">D</span>
           <span class="dm-text"><span class="dm-name">Dev Team</span><span class="dm-state">6 members</span></span>
           <span class="badge" aria-label="7 unread">7</span>
         </button></li>
-        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+        <li><button class="dm-item contact" type="button" data-chat="sam" title="Test contact">
           <span class="avatar" data-tone="5" aria-hidden="true">S</span>
           <span class="dm-text"><span class="dm-name">Sam Okafor</span><span class="dm-state">Offline</span></span>
         </button></li>
-        <li><button class="dm-item demo" type="button" aria-disabled="true" title="Demo contact">
+        <li><button class="dm-item contact" type="button" data-chat="leah" title="Test contact">
           <span class="avatar" data-tone="6" aria-hidden="true">L</span>
           <span class="dm-text"><span class="dm-name">Leah Brooks</span><span class="dm-state">Online</span></span>
           <span class="badge" aria-label="2 unread">2</span>
@@ -184,7 +184,7 @@
         <div id="logEmpty" class="log-empty">
           <span class="avatar big" id="emptyAvatar" aria-hidden="true"></span>
           <p class="empty-title" id="emptyTitle"></p>
-          <p class="hint">Hold the circle below to send a voice message. It arrives as clean, professional text. Join the call to talk in your cloned voice.</p>
+          <p id="emptyHint" class="hint">Hold the circle below to send a voice message. It arrives as clean, professional text. Join the call to talk in your cloned voice.</p>
         </div>
         <span id="logState" class="visually-hidden">No messages yet</span>
       </div>
