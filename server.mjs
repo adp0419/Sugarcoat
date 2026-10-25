@@ -21,6 +21,9 @@ const files = new Map([
   ['/call', ['public/call.html', 'text/html; charset=utf-8']],
   ['/call.js', ['public/call.js', 'text/javascript; charset=utf-8']],
   ['/call.css', ['public/call.css', 'text/css; charset=utf-8']],
+  ['/brand/logo.svg', ['public/brand/logo.svg', 'image/svg+xml']],
+  ['/brand/favicon.svg', ['public/brand/favicon.svg', 'image/svg+xml']],
+  ['/brand/favicon.png', ['public/brand/favicon.png', 'image/png']],
 ]);
 
 function readAudio(req, limit, signal) {
