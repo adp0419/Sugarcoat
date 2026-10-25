@@ -386,6 +386,7 @@ select { width: 100%; min-height: 40px; padding: var(--space-2) 12px; border: 1p
     box-shadow: 0 12px 40px rgb(42 40 38 / .22); transform: translateX(-102%); visibility: hidden;
     transition: transform 220ms ease, visibility 0s linear 220ms; }
   .app[data-drawer="open"] .rail { transform: none; visibility: visible; transition: transform 220ms ease; }
+  .app:not([data-drawer="open"]) .rail { pointer-events: none; } /* taps pass through while it slides away */
   .rail-brand { display: flex; }
   .rail-heading { display: block; }
   .dm-item.contact { display: flex; }

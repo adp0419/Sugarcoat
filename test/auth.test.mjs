@@ -156,7 +156,9 @@ test('call relay: a session names the caller (as= cannot spoof) and works withou
   const poll = await fetch(`${base}/api/call/poll?as=rohit&access_token=${encodeURIComponent(token)}`);
   assert.equal(poll.status, 200);
   assert.equal((await poll.json()).you, 'aryan');
-  assert.equal((await fetch(`${base}/api/call/poll?as=aryan`)).status, 503); // no session, no token configured
+  const noSession = await fetch(`${base}/api/call/poll?as=aryan`);
+  assert.equal(noSession.status, 401); // accounts on, no session, no token configured
+  assert.equal((await noSession.json()).code, 'AUTH_REQUIRED');
   assert.equal((await fetch(`${base}/api/call/poll?as=aryan&access_token=tok:eve@example.com`)).status, 403);
 });
 

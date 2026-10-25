@@ -71,6 +71,7 @@ export async function createApp(config = readConfig(), { fetchImpl, synthesize: 
       return;
     }
     if (req.method === 'GET' && path === '/healthz') { json(200, { ok: true }); return; }
+    if (req.method === 'GET' && path === '/favicon.ico') { res.writeHead(204); res.end(); return; }
     // With accounts on, the comms page is the home page; the single-user recorder lives at /lite.
     if (req.method === 'GET' && path === '/' && auth.enabled) { res.writeHead(302, { Location: '/call' }); res.end(); return; }
     if (req.method === 'GET' && files.has(path)) {

@@ -680,7 +680,10 @@ async function sendRecording(run, mimeType) {
       } else if (event.type === 'preview') { if (entry && event.text && !entry.raw) setText(entry, String(event.text), true); }
       else if (event.type === 'cleaned') {
         cleanedText = String(event.text || '').trim();
-        if (cleanedText) { entry.id = event.id ?? null; ownEntries.set(entry.id, entry); showEdits(entry, String(event.raw || entry.raw || ''), cleanedText); }
+        if (cleanedText) {
+          entry.id = event.id ?? null; ownEntries.set(entry.id, entry);
+          const early = turns.get(entry.id); if (early?.own && !early.entry) early.entry = entry;
+          showEdits(entry, String(event.raw || entry.raw || ''), cleanedText); }
         else { removeEntry(entry); entry = null; }
       } else if (event.type === 'error') throw Object.assign(new Error(event.error || ''), { code: event.code });
       else if (event.type === 'done') finished = true;
@@ -742,8 +745,9 @@ function onClip(data) {
   if (data.id == null || !from) return;
   const turn = turnFor(data.id, from);
   // A test contact's clip is your own line in your cloned voice: play it on your message.
-  if (!turn.entry && isContact(from)) { turn.entry = ownEntries.get(data.id); turn.own = true; if (!turn.entry) { turn.done = true; return; } }
-  if (!turn.entry) turn.entry = addEntry('peer', 'Voice message', 'Waiting', 'waiting', 'call', from);
+  // The clip can beat the "cleaned" line of your own send; sendRecording attaches the entry then.
+  if (!turn.entry && isContact(from)) { turn.entry = ownEntries.get(data.id); turn.own = true; }
+  if (!turn.entry && !turn.own) turn.entry = addEntry('peer', 'Voice message', 'Waiting', 'waiting', 'call', from);
   if (turn.clips.has(data.seq) || turn.done) return;
   turn.clips.set(data.seq, data);
   turn.firstClipAt ??= performance.now();
@@ -822,7 +826,7 @@ async function playTurn(turn) {
       : `${peerName()} said something, but it couldn’t be played. Ask them to say it again.`);
     return;
   }
-  if (turn.own) { turn.entry.playedBack = true; finishTurn(turn, 'Played in your cloned voice', 'heard'); return; }
+  if (turn.own) { if (turn.entry) turn.entry.playedBack = true; finishTurn(turn, 'Played in your cloned voice', 'heard'); return; }
   finishTurn(turn, 'Heard', 'heard');
   ack(turn.id);
 }

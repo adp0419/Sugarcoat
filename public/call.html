@@ -14,8 +14,9 @@
 </head>
 <body>
   <!-- Sign in -->
-  <main id="login" class="login">
-    <form id="loginForm" class="login-card" novalidate>
+  <!-- Hidden until call.js is ready, so an early Enter can't submit the form natively. -->
+  <main id="login" class="login" hidden>
+    <form id="loginForm" class="login-card" method="post" novalidate>
       <div class="brand login-brand">
         <svg class="mark" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v4m5-9v14m5-18v22m5-18v14m5-9v4"/></svg>
         <span>Sugarcoat</span>
